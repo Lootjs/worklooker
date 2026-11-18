@@ -1,0 +1,15 @@
+node_modules/
+.pnpm-store/
+dist/
+data/
+.env
+playwright-report/
+.playwright-mcp/
+.idea
+test-results/
+.playwright-mcp/
+.idea/
+worklooker.local.json
+# Impeccable: only the design sidecar is shared; critiques and live sessions stay local.
+.impeccable/*
+!.impeccable/design.json

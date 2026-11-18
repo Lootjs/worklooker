@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-19T00:00:00Z",
+  "title": "Design System: Worklooker",
+  "extensions": {
+    "colorMeta": {
+      "night": { "role": "neutral", "displayName": "Ночь", "tonalRamp": ["#07090c", "#0d1014", "#12151b", "#1b2027", "#2c323a", "#434c56", "#6b7680", "#aeb5bb"] },
+      "paper": { "role": "neutral", "displayName": "Бумага", "tonalRamp": ["#8f8b84", "#b3afa7", "#cfcbc3", "#e2ded6", "#ece9e2", "#f2efe8", "#f7f4ee", "#fcfbf8"] },
+      "accent-teal": { "role": "primary", "displayName": "Чернильный сине-зелёный", "tonalRamp": ["#06232b", "#0b3a47", "#0f5667", "#2b7183", "#4f8e9e", "#7fb0bc", "#b4d2d9", "#e3eff2"] },
+      "deep-teal": { "role": "primary", "displayName": "Глубокий сине-зелёный", "tonalRamp": ["#071c23", "#0e303c", "#153e4b", "#2a5766", "#4a7584", "#7b9ea9", "#b3c9d0", "#e4edf0"] },
+      "amber": { "role": "secondary", "displayName": "Янтарь", "tonalRamp": ["#4a3510", "#7a5a1c", "#b8862e", "#e0a63e", "#f7bd4f", "#f9cf7f", "#fbe1b0", "#fdf2dc"] },
+      "reject-red": { "role": "tertiary", "displayName": "Румяно-красный", "tonalRamp": ["#3b1613", "#5e2420", "#7d302b", "#9d3d36", "#bd635c", "#d6938e", "#f2d2cd", "#f8e5e2"] }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Заголовок вакансии", "purpose": "Название в очереди; до 24ch и 3 строк." },
+      "title": { "displayName": "Заголовок в ленте", "purpose": "Название в ленте «Лайкнутых»." },
+      "body": { "displayName": "Описание", "purpose": "Текст вакансии, до 65ch, переносы сохраняются." },
+      "label": { "displayName": "Подпись", "purpose": "Источник, соответствие, причины, автор." }
+    },
+    "shadows": [
+      { "name": "sheet-on-desk", "value": "0 32px 70px rgba(0,0,0,.3)", "purpose": "Карточка очереди." },
+      { "name": "sheet-in-stack", "value": "0 24px 60px rgba(0,0,0,.28)", "purpose": "Карточки ленты «Лайкнутых»." },
+      { "name": "floating", "value": "0 12px 32px rgba(0,0,0,.45)", "purpose": "Плашка отмены отклонения." }
+    ],
+    "motion": [
+      { "name": "ease-arrive", "value": "cubic-bezier(.2,.9,.2,1)", "purpose": "Появление карточки (.28s), фокус в ленте (.24–.32s)." }
+    ],
+    "breakpoints": [
+      { "name": "narrow", "value": "650px" },
+      { "name": "side-dock", "value": "1280px" }
+    ]
+  },
+  "components": [
+    { "name": "Сохранить", "kind": "button", "refersTo": "button-save", "description": "Утвердительное решение по вакансии.", "html": "<button class=\"ds-btn-save\">Сохранить</button>", "css": ".ds-btn-save { background: #153e4b; color: #f7f4ee; border: 0; border-radius: 13px; padding: 17px 24px; font: 700 .875rem 'Trebuchet MS', Arial, sans-serif; cursor: pointer; } .ds-btn-save:hover { background: #0e303c; } .ds-btn-save:focus-visible { outline: 3px solid #f7bd4f; outline-offset: 3px; }" },
+    { "name": "Отклонить", "kind": "button", "refersTo": "button-reject", "description": "Отказ; обратим 5 секунд.", "html": "<button class=\"ds-btn-reject\">Отклонить</button>", "css": ".ds-btn-reject { background: #f8e5e2; color: #9d3d36; border: 0; border-radius: 13px; padding: 17px 24px; font: 700 .875rem 'Trebuchet MS', Arial, sans-serif; cursor: pointer; } .ds-btn-reject:hover { background: #f2d2cd; } .ds-btn-reject:focus-visible { outline: 3px solid #f7bd4f; outline-offset: 3px; }" },
+    { "name": "Главное на тёмном", "kind": "button", "refersTo": "button-primary", "description": "Главное действие на ночном фоне.", "html": "<button class=\"ds-btn-primary\">Собрать вакансии</button>", "css": ".ds-btn-primary { background: #f7bd4f; color: #12151b; border: 0; border-radius: 8px; padding: 12px 18px; font: 800 .875rem 'Trebuchet MS', Arial, sans-serif; cursor: pointer; } .ds-btn-primary:focus-visible { outline: 3px solid #f7bd4f; outline-offset: 3px; }" },
+    { "name": "Причина", "kind": "chip", "refersTo": "chip-reason", "description": "Почему вакансия в очереди.", "html": "<span class=\"ds-chip\">стек: TypeScript, Vue</span>", "css": ".ds-chip { display: inline-block; background: #d9ece9; color: #244956; border-radius: 999px; padding: 6px 10px; font: 700 .8125rem 'Trebuchet MS', Arial, sans-serif; }" },
+    { "name": "Разделы", "kind": "nav", "refersTo": "nav-tab-active", "description": "Переключатель очереди и лайкнутых.", "html": "<nav class=\"ds-nav\"><button class=\"ds-tab ds-tab-active\" aria-pressed=\"true\">Очередь 8</button><button class=\"ds-tab\" aria-pressed=\"false\">Лайкнутые 10</button></nav>", "css": ".ds-nav { display: inline-flex; gap: 6px; background: #1b2027; border-radius: 10px; padding: 4px; } .ds-tab { border: 0; background: transparent; color: #aeb5bb; padding: 8px 12px; border-radius: 7px; font: 700 .875rem 'Trebuchet MS', Arial, sans-serif; cursor: pointer; } .ds-tab-active { background: #f7f4ee; color: #12151b; }" },
+    { "name": "Карточка вакансии", "kind": "card", "refersTo": "vacancy-card", "description": "Один лист на столе решений.", "html": "<article class=\"ds-card\"><div class=\"ds-card-meta\"><span>DEV JOBS</span><span class=\"ds-fit\">сильное соответствие</span></div><h1>Head of Frontend</h1><p class=\"ds-company\">Kleos</p><p class=\"ds-body\">Удалённо. Vue 3, TypeScript, команда из 8 человек.</p></article>", "css": ".ds-card { background: #f7f4ee; color: #172028; border-radius: 16px; padding: 48px; box-shadow: 0 32px 70px rgba(0,0,0,.3); font-family: 'Trebuchet MS', Arial, sans-serif; max-width: 640px; } .ds-card-meta { display: flex; justify-content: space-between; color: #57656b; font-size: .8125rem; font-weight: 700; letter-spacing: .04em; } .ds-fit { background: #0f5667; color: #f7f4ee; border-radius: 999px; padding: 4px 10px; letter-spacing: 0; } .ds-card h1 { margin: 32px 0 0; font-size: 2.5rem; line-height: 1.05; letter-spacing: -.025em; } .ds-company { margin: 12px 0 0; color: #34515b; font-weight: 700; } .ds-body { margin: 24px 0 0; color: #39454b; line-height: 1.6; }" }
+  ],
+  "narrative": {
+    "northStar": "Стол решений",
+    "overview": "На тёмном столе лежит один лист — одна вакансия. Её читают, решают «сохранить» или «отклонить», и лист уходит, освобождая место следующему. Тон спокойный и решительный: рабочий инструмент для одного человека, привычность и предсказуемость здесь — достоинство.",
+    "keyCharacteristics": ["Одна вакансия в фокусе; всё остальное приглушено или размыто.", "Кремовая карточка на почти чёрном фоне, без рамок.", "Причины соответствия показаны всегда, сразу под названием.", "Один шрифт, фиксированная шкала в rem, никакого плавного масштабирования.", "Действие с последствиями (отклонение) обратимо в течение 5 секунд."],
+    "rules": [
+      { "name": "The Meaning-Only Color Rule", "body": "Цвет на карточке всегда что-то значит: сине-зелёный — «да» и ссылки, красный — «нет», мятный — «почему». Декоративного цвета нет.", "section": "colors" },
+      { "name": "The Contrast Floor Rule", "body": "Любой текст на бумаге — не светлее ink-meta (#57656b, 5.5:1).", "section": "colors" },
+      { "name": "The Fixed Scale Rule", "body": "Размеры только из шкалы в rem. Никаких clamp() и vw в тексте.", "section": "typography" },
+      { "name": "The Reasons-Above-Fold Rule", "body": "Плашки причин должны быть видны без прокрутки на 1280×720.", "section": "typography" },
+      { "name": "The Border-or-Shadow Rule", "body": "У поверхности либо тень, либо тонкая обводка, но не обе сразу.", "section": "elevation" }
+    ],
+    "dos": ["Do держите одну вакансию в фокусе: всё, что не в фокусе, приглушайте, а не прячьте.", "Do ставьте причины соответствия сразу под названием и компанией.", "Do берите размеры и отступы только из шкал.", "Do проверяйте контраст текста на бумаге: не светлее ink-meta (#57656b).", "Do применяйте эффекты движения к внутреннему блоку, когда снаружи работает прокрутка или примагничивание.", "Do уважайте prefers-reduced-motion."],
+    "donts": ["Don't закрывайте карточку уведомлениями.", "Don't меняйте высоту элементов при смене фокуса в ленте.", "Don't используйте clamp() или vw для размера текста.", "Don't добавляйте рамку к карточке, у которой уже есть тень.", "Don't делайте необратимое действие мгновенным.", "Don't используйте эмодзи или символы Юникода вместо иконок."]
+  }
+}

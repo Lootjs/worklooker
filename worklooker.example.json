@@ -1,0 +1,14 @@
+{
+  "profile": {
+    "roles": [
+      "frontend developer", "front-end lead"
+    ],
+    "field": ["frontend", "front-end", "vue", "svelte", "javascript", "typescript", "фронтенд*"],
+    "seniority": ["senior", "staff"],
+    "skills": ["JavaScript", "TypeScript", "Vue", "Vite", "Svelte"],
+    "remoteOnly": true,
+    "preferRussian": true,
+    "minScore": 6
+  },
+  "disabledSources": []
+}
