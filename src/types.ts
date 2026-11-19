@@ -14,7 +14,10 @@ export interface Source {
   /** Structured listing cards; without it, every matching link is a candidate. */
   card?: {
     item: string;
-    /** Link whose text is the vacancy title and whose href is the vacancy URL. */
+    /**
+     * Link whose text is the vacancy title and whose href is the vacancy URL.
+     * When the card itself is a link, this is just the title element inside it.
+     */
     title: string;
     company?: string;
   };
@@ -24,6 +27,20 @@ export interface Source {
    * pass the profile filter, then rated again with the full text.
    */
   detailDescription?: string;
+  /**
+   * How to read the source; without it the listing is rendered in a browser.
+   * - `json-ld`: listings and vacancy pages carry schema.org JSON-LD
+   *   (`ItemList`, `JobPosting`), read over plain HTTP. Listing pages stop at
+   *   the first empty one.
+   * - `rss`: `url` is an RSS feed whose items hold the full description.
+   * - `tribe`: Tribe's own public JSON API (see `src/tribe.ts`).
+   * - `tilda-feed`: `url` is a Tilda Feeds API URL (see `src/tilda.ts`).
+   * - `peopleforce`: a PeopleForce career site's `.json` pages (see `src/peopleforce.ts`).
+   * - `greenhouse`: `url` and `extraUrls` are Greenhouse Job Board API URLs (see `src/greenhouse.ts`).
+   * - `ashby`: `url` is an Ashby job posting API URL (see `src/ashby.ts`).
+   * All of them ignore `card` and `detailDescription`.
+   */
+  format?: "json-ld" | "rss" | "tribe" | "tilda-feed" | "peopleforce" | "greenhouse" | "ashby";
   /** The supplied URLs already select remote vacancies where the source supports it. */
   remoteByDefault: boolean;
   /** Paths which identify a vacancy detail link on this particular source. */
@@ -40,6 +57,12 @@ export interface Vacancy {
   url: string;
   snippet: string;
   remoteByDefault: boolean;
+  /**
+   * Work format from the source's structured data: true for remote, false for
+   * hybrid or on-site. Absent when the source does not say, and then the
+   * matcher looks for remote wording in the text.
+   */
+  remote?: boolean;
   fetchedAt: string;
 }
 

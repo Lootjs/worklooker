@@ -1,0 +1,180 @@
+import { tidyLines } from "./scrape.js";
+import type { RatedVacancy, Source, Vacancy } from "./types.js";
+
+/**
+ * Sources that publish schema.org JSON-LD in their server-rendered HTML: a
+ * `JobPosting` on each vacancy page and, ideally, an `ItemList` of vacancies
+ * on listing pages. Plain HTTP is enough, so these sources skip the browser.
+ */
+
+type JsonLdNode = Record<string, unknown> & { "@type"?: string | string[] };
+
+interface ListItem {
+  name?: string;
+  url?: string;
+  description?: string;
+}
+
+interface Place {
+  address?: { addressLocality?: string; addressCountry?: string | { name?: string } };
+}
+
+interface JobPosting {
+  title?: string;
+  description?: string;
+  jobLocationType?: string;
+  jobLocation?: Place | Place[];
+  hiringOrganization?: { name?: string };
+  applicantLocationRequirements?: { name?: string } | Array<{ name?: string }>;
+  baseSalary?: { currency?: string; value?: { minValue?: number; maxValue?: number; unitText?: string } };
+}
+
+// Built In sits behind Cloudflare: parallel requests get HTTP 429 and then a
+// challenge page. Read vacancy pages one at a time with a pause.
+const detailPauseMs = 500;
+// Some sites escape `+` in the type attribute as `&#x2B;`.
+const jsonLdScript = /<script[^>]*type=["']application\/ld(?:\+|&#x2B;|&#43;)json["'][^>]*>([\s\S]*?)<\/script>/gi;
+
+class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(status === 429 ? "сайт ограничил частоту запросов (HTTP 429), попробуйте позже" : `сайт вернул HTTP ${status}`);
+  }
+}
+
+export async function fetchText(url: string, timeoutMs = 30_000): Promise<string> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  if (!response.ok) throw new HttpError(response.status);
+  return response.text();
+}
+
+/** Every JSON-LD node on the page, with `@graph` containers flattened. */
+function jsonLdNodes(html: string): JsonLdNode[] {
+  return [...html.matchAll(jsonLdScript)].flatMap(([, body]) => {
+    try {
+      const parsed = JSON.parse(body) as JsonLdNode | JsonLdNode[];
+      return (Array.isArray(parsed) ? parsed : [parsed]).flatMap((node) => Array.isArray(node["@graph"]) ? node["@graph"] as JsonLdNode[] : [node]);
+    } catch {
+      return [];
+    }
+  });
+}
+
+function nodeOfType<T>(nodes: JsonLdNode[], type: string): T | undefined {
+  return nodes.find((node) => [node["@type"]].flat().includes(type)) as T | undefined;
+}
+
+const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
+
+/** Decodes named and numeric character references. */
+export function decodeEntities(text: string): string {
+  return text.replace(/&(#x[\da-f]+|#\d+|\w+);/gi, (match, code: string) => {
+    if (code[0] !== "#") return entities[code.toLowerCase()] ?? match;
+    const point = code[1].toLowerCase() === "x" ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+    return Number.isFinite(point) ? String.fromCodePoint(point) : match;
+  });
+}
+
+/** Vacancy descriptions are HTML: keep paragraphs and list items as lines. */
+export function htmlToText(html: string): string {
+  return tidyLines(decodeEntities(html
+    // Each item starts its own line, so its closing tag, or a paragraph that
+    // ends it, must not add another one.
+    .replace(/(?:<\/p>\s*)?<\/li>/gi, "")
+    .replace(/<li[^>]*>/gi, "\n• ")
+    .replace(/<(?:br|\/p|\/ul|\/ol|\/h\d|\/div)[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, "")));
+}
+
+/** Vacancy links on a listing page without an `ItemList`: titles only. */
+function linkedVacancies(html: string, pageUrl: string, source: Source): Array<{ url: string; title: string }> {
+  return [...html.matchAll(/<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)].flatMap(([, href, inner]) => {
+    const url = new URL(decodeEntities(href), pageUrl);
+    return source.vacancyPathPatterns.some((pattern) => pattern.test(url.pathname))
+      ? [{ url: url.href, title: decodeEntities(inner.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim() }]
+      : [];
+  });
+}
+
+/**
+ * Reads the listing pages in order and stops at the first one without
+ * vacancies, so spare pages in `extraUrls` cost one request at most. A first
+ * page without an `ItemList` falls back to its vacancy links, which carry
+ * titles only; `summaries` tells the caller which case it got.
+ */
+async function listVacancies(source: Source): Promise<{ vacancies: Vacancy[]; summaries: boolean }> {
+  const seen = new Set<string>();
+  const vacancies: Vacancy[] = [];
+  const add = (url: string, title: string, snippet: string) => {
+    if (!title || seen.has(url) || !source.vacancyPathPatterns.some((pattern) => pattern.test(new URL(url).pathname))) return;
+    seen.add(url);
+    vacancies.push({ source: source.id, sourceName: source.name, title, url, snippet, remoteByDefault: source.remoteByDefault, fetchedAt: new Date().toISOString() });
+  };
+  for (const [index, pageUrl] of [source.url, ...(source.extraUrls ?? [])].entries()) {
+    const html = await fetchText(pageUrl);
+    const items = nodeOfType<{ itemListElement?: ListItem[] }>(jsonLdNodes(html), "ItemList")?.itemListElement;
+    if (!items && index === 0) {
+      for (const link of linkedVacancies(html, pageUrl, source)) add(link.url, link.title, "");
+      return { vacancies, summaries: false };
+    }
+    if (!items?.length) break;
+    for (const item of items) {
+      if (item.name && item.url) add(new URL(item.url, pageUrl).href, item.name.trim(), tidyLines(item.description ?? ""));
+    }
+  }
+  return { vacancies, summaries: true };
+}
+
+/**
+ * Collects and rates a JSON-LD source. With listing summaries, only vacancies
+ * that pass the profile get their JobPosting, and are rated again on it. A
+ * listing of bare titles says too little to rate, so every vacancy gets its
+ * JobPosting first.
+ */
+export async function collectJsonLd(source: Source, rate: (vacancies: Vacancy[]) => RatedVacancy[]): Promise<RatedVacancy[]> {
+  const { vacancies, summaries } = await listVacancies(source);
+  return rate(await withJobPostings(summaries ? rate(vacancies) : vacancies));
+}
+
+/** One line of working conditions: format, location, who may apply, salary. */
+function conditions(posting: JobPosting): string {
+  const countries = [posting.applicantLocationRequirements ?? []].flat().map((place) => place.name).filter(Boolean);
+  const salary = posting.baseSalary?.value;
+  const places = [posting.jobLocation ?? []].flat().map(({ address }) => {
+    const country = typeof address?.addressCountry === "string" ? address.addressCountry : address?.addressCountry?.name;
+    return [address?.addressLocality, country].filter(Boolean).join(", ");
+  }).filter(Boolean);
+  return [
+    posting.jobLocationType === "TELECOMMUTE" ? "Remote" : undefined,
+    places.length ? [...new Set(places)].join("; ") : undefined,
+    countries.length ? `Applicants from: ${countries.join(", ")}` : undefined,
+    salary?.minValue || salary?.maxValue
+      ? `${posting.baseSalary?.currency ?? ""} ${[salary.minValue, salary.maxValue].filter(Boolean).join("–")}${salary.unitText ? ` / ${salary.unitText.toLowerCase()}` : ""}`.trim()
+      : undefined,
+  ].filter(Boolean).join(" · ");
+}
+
+/**
+ * Replaces the listing summary with the vacancy page's JobPosting: title,
+ * company, working conditions and the full description. A page that fails to load
+ * keeps its listing summary rather than failing the source.
+ */
+export async function withJobPostings<T extends Vacancy>(vacancies: T[]): Promise<T[]> {
+  const enriched = [...vacancies];
+  for (const [index, vacancy] of vacancies.entries()) {
+    if (index > 0) await new Promise((resolve) => setTimeout(resolve, detailPauseMs));
+    try {
+      const posting = nodeOfType<JobPosting>(jsonLdNodes(await fetchText(vacancy.url)), "JobPosting");
+      if (!posting) continue;
+      const title = posting.title ? decodeEntities(posting.title).trim() : "";
+      const company = posting.hiringOrganization?.name?.trim();
+      const snippet = [conditions(posting), htmlToText(posting.description ?? "")].filter(Boolean).join("\n\n");
+      // Only TELECOMMUTE is explicit; sites often omit the field for office jobs.
+      const remote = posting.jobLocationType === "TELECOMMUTE" ? { remote: true } : {};
+      enriched[index] = { ...vacancy, ...(title ? { title } : {}), ...(company ? { company } : {}), ...remote, snippet: (snippet || vacancy.snippet).slice(0, 4_000) };
+    } catch (error) {
+      // Rate-limited: stop asking, the rest keep their listing summaries.
+      if (error instanceof HttpError && error.status === 429) break;
+    }
+  }
+  return enriched;
+}

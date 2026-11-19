@@ -158,10 +158,12 @@ async function scrapeListing(page: Page, source: Source, url: string): Promise<L
     const { item, title, company } = source.card;
     return page.locator(item).evaluateAll((cards, selectors) =>
       cards.flatMap((card) => {
-        const link = card.querySelector(selectors.title) as HTMLAnchorElement | null;
-        if (!link?.href) return [];
+        const titleElement = card.querySelector(selectors.title) as HTMLElement | null;
+        // A card may be the link itself, with the title as a heading inside it.
+        const link = (card instanceof HTMLAnchorElement ? card : titleElement) as HTMLAnchorElement | null;
+        if (!titleElement || !link?.href) return [];
         const companyText = selectors.company ? (card.querySelector(selectors.company) as HTMLElement | null)?.innerText : undefined;
-        return [{ href: link.href, title: link.innerText, company: companyText, text: (card as HTMLElement).innerText }];
+        return [{ href: link.href, title: titleElement.innerText, company: companyText, text: (card as HTMLElement).innerText }];
       }), { title, company });
   }
 

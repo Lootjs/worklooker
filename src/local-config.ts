@@ -6,15 +6,18 @@ import { readFileSync } from "node:fs";
  * Russian endings: `руководител*` matches «руководитель», «руководителя».
  */
 export interface MatchProfile {
-  /** Target roles. Any of them in a vacancy is the strongest signal. */
+  /** Target roles. Any of them in a vacancy's title is the strongest signal. */
   roles: string[];
-  /** Your field: a senior role in it is kept for manual review even without a target role. */
+  /**
+   * Your field: a title in it ("Frontend Developer") at a senior level is kept
+   * for manual review even without a target role.
+   */
   field: string[];
   /** Seniority words; they also match as prefixes, e.g. `lead` matches «leadership». */
   seniority: string[];
   /** Skills shown as reasons and added to the score. */
   skills: string[];
-  /** Drop every vacancy without a remote signal. */
+  /** Drop every vacancy that is not remote: by the source's work format, or remote wording when it has none. */
   remoteOnly: boolean;
   /** Rank vacancies with a Russian-speaking environment higher. */
   preferRussian: boolean;

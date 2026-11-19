@@ -37,6 +37,12 @@ function textFor(vacancy: Vacancy): string {
  * Builds a rater for one profile. It scores conservatively: remote can be
  * mandatory, a target role is weighted heavily, and a senior role in the
  * user's field is kept for manual review.
+ *
+ * The role decides what a vacancy is, so target roles and the field are read
+ * from the title only: a description mentions other roles too ("you will
+ * report to our Head of Engineering", "our app is built with TypeScript").
+ * Seniority, skills, remote wording and language come from the whole text,
+ * since titles often omit the level ("Frontend Developer (Vue 3)").
  */
 export function createMatcher(profile: MatchProfile): (vacancy: Vacancy) => RatedVacancy | undefined {
   const rolePattern = anyOf(profile.roles);
@@ -49,15 +55,18 @@ export function createMatcher(profile: MatchProfile): (vacancy: Vacancy) => Rate
     const reasons: string[] = [];
     let score = 0;
 
-    const isRemote = vacancy.remoteByDefault || remotePattern.test(text);
+    // A structured work format beats wording: a hybrid job's description may
+    // still say "remote-friendly".
+    const isRemote = vacancy.remote ?? (vacancy.remoteByDefault || remotePattern.test(text));
     if (profile.remoteOnly && !isRemote) return undefined;
     if (isRemote) {
       score += 4;
       reasons.push("удалённый формат");
     }
 
-    const hasTargetRole = rolePattern.test(text);
-    const isSeniorInField = seniorPattern.test(text) && fieldPattern.test(text);
+    const title = vacancy.title.replace(/\s+/g, " ");
+    const hasTargetRole = rolePattern.test(title);
+    const isSeniorInField = fieldPattern.test(title) && seniorPattern.test(text);
     if (hasTargetRole) {
       score += 7;
       reasons.push("целевая роль");

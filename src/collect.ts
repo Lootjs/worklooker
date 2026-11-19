@@ -3,6 +3,13 @@ import { readProfile } from "./local-config.js";
 import { createMatcher } from "./match.js";
 import { enabledSources, wantApplyBotSource } from "./sources.js";
 import { scrapeSource, withDetailDescriptions } from "./scrape.js";
+import { scrapeAshby } from "./ashby.js";
+import { scrapeGreenhouse } from "./greenhouse.js";
+import { scrapePeopleForce } from "./peopleforce.js";
+import { scrapeRss } from "./rss.js";
+import { collectJsonLd } from "./structured-data.js";
+import { scrapeTildaFeed } from "./tilda.js";
+import { scrapeTribe } from "./tribe.js";
 import { mergeSourceVacancies, pruneRemovedSources } from "./store.js";
 import { scrapeWantApplyBot, wantApplyBotIsReady } from "./telegram.js";
 import type { RatedVacancy, Source, Vacancy } from "./types.js";
@@ -45,7 +52,16 @@ export async function collectVacancies(onEvent: (event: CollectionEvent) => void
   const rateVacancy = createMatcher(profile);
   const browser = await chromium.launch({ headless: true });
   try {
-    const tasks: Array<{ source: Source; collect: () => Promise<Vacancy[]> }> = enabledSources().map((source) => ({ source, collect: () => scrapeSource(source, browser) }));
+    const tasks: Array<{ source: Source; collect: () => Promise<Vacancy[]> }> = enabledSources().map((source) => ({
+      source,
+      collect: () => source.format === "rss" ? scrapeRss(source)
+        : source.format === "tribe" ? scrapeTribe(source)
+        : source.format === "tilda-feed" ? scrapeTildaFeed(source)
+        : source.format === "peopleforce" ? scrapePeopleForce(source)
+        : source.format === "greenhouse" ? scrapeGreenhouse(source)
+        : source.format === "ashby" ? scrapeAshby(source)
+        : scrapeSource(source, browser),
+    }));
     if (await wantApplyBotIsReady()) tasks.push({ source: wantApplyBotSource, collect: scrapeWantApplyBot });
     onEvent({ type: "start", total: tasks.length });
 
@@ -59,10 +75,15 @@ export async function collectVacancies(onEvent: (event: CollectionEvent) => void
       let sourceAdded = 0;
       try {
         const rate = (vacancies: Vacancy[]): RatedVacancy[] => vacancies.map(rateVacancy).filter((vacancy): vacancy is RatedVacancy => vacancy !== undefined);
-        matched = rate(await collect());
-        // Listing cards may hold only metadata: fetch the full description for
-        // the vacancies that passed, and rate them again on the complete text.
-        if (source.detailDescription) matched = rate(await withDetailDescriptions(source, matched, browser));
+        if (source.format === "json-ld") {
+          // Decides itself which vacancy pages to read before rating.
+          matched = await collectJsonLd(source, rate);
+        } else {
+          matched = rate(await collect());
+          // Listing cards may hold only metadata: fetch the full description for
+          // the vacancies that passed, and rate them again on the complete text.
+          if (source.detailDescription) matched = rate(await withDetailDescriptions(source, matched, browser));
+        }
         sourceAdded = (await mergeSourceVacancies(source.id, matched)).added;
       } catch (reason) {
         error = errorMessage(reason);

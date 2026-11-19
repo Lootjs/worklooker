@@ -39,7 +39,7 @@ The collector runs locally and is started manually or by a local scheduler. The 
 
 ## Evidence on Hand
 
-Configured sources (`src/sources.ts`) are Getmatch, GeekJob, Wantapply, Remocate, Dev Connectable Jobs, Job for IT-TOP, Relocate, Dev Jobs, Remote Jobs Relocate, Tabby careers, Uzum careers, and Emex careers. There are no supplied brand assets, screenshots, or visual references.
+There are no supplied brand assets, screenshots, or visual references.
 
 ## Product Principles
 
