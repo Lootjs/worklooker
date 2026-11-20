@@ -41,6 +41,10 @@ const expanded = ref(false);
 
 const visible = computed(() => vacancies.value.filter((vacancy) => vacancy.status === view.value));
 const current = computed(() => visible.value[0]);
+// Each card in the queue starts folded. Tied to the card itself, not to server
+// replies: a rejection is sent only when its undo window closes, by which time
+// the next card may already be open for reading.
+watch(() => current.value?.id, () => { expanded.value = false; });
 const queueCount = computed(() => vacancies.value.filter((vacancy) => vacancy.status === "new").length);
 const likedCount = computed(() => vacancies.value.filter((vacancy) => vacancy.status === "liked").length);
 
@@ -194,7 +198,6 @@ function reject(target: Vacancy | undefined = current.value): void {
   flushPendingReject();
   pendingReject.value = { vacancy: target, title: target.title, previous: target.status, timer: window.setTimeout(() => flushPendingReject(), undoWindowMs) };
   vacancies.value = withLocalStatus(vacancies.value, target.id, "rejected");
-  expanded.value = false;
 }
 
 function undoReject(): void {
@@ -263,7 +266,6 @@ async function setStatus(status: Status, open = false, target: Vacancy | undefin
     const changed = await response.json() as Vacancy;
     decisionVersion += 1;
     vacancies.value = vacancies.value.map((vacancy) => vacancy.id === changed.id ? changed : vacancy);
-    expanded.value = false;
   } catch {
     // Show the card in its saved state again, and offer to retry the exact decision.
     const title = target.title;
