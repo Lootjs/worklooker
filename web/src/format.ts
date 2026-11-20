@@ -27,12 +27,21 @@ export function percent(share: number): string {
   return new Intl.NumberFormat("ru-RU", { style: "percent", maximumFractionDigits: share > 0 && share < 0.1 ? 1 : 0 }).format(share);
 }
 
-/** "опубликована 3 дня назад" when the source dates it, "найдена …" when only Worklooker does. */
-export function ageLabel(vacancy: Pick<SavedVacancy, "publishedAt" | "publishedAtSource">): string | undefined {
-  if (!vacancy.publishedAt) return undefined;
-  const verb = vacancy.publishedAtSource === "source" ? "опубликована" : "найдена";
-  const days = Math.floor((Date.now() - new Date(vacancy.publishedAt).getTime()) / 86_400_000);
+/** "<verb> сегодня", "<verb> вчера", "<verb> 3 дня назад". */
+function daysAgo(verb: string, value: string): string {
+  const days = Math.floor((Date.now() - new Date(value).getTime()) / 86_400_000);
   if (days <= 0) return `${verb} сегодня`;
   if (days === 1) return `${verb} вчера`;
   return `${verb} ${days} ${plural(days, "день", "дня", "дней")} назад`;
+}
+
+/** "опубликована 3 дня назад" when the source dates it, "найдена …" when only Worklooker does. */
+export function ageLabel(vacancy: Pick<SavedVacancy, "publishedAt" | "publishedAtSource">): string | undefined {
+  if (!vacancy.publishedAt) return undefined;
+  return daysAgo(vacancy.publishedAtSource === "source" ? "опубликована" : "найдена", vacancy.publishedAt);
+}
+
+/** When the user liked it: "лайкнута 2 дня назад". */
+export function likedLabel(vacancy: Pick<SavedVacancy, "decidedAt">): string | undefined {
+  return vacancy.decidedAt ? daysAgo("лайкнута", vacancy.decidedAt) : undefined;
 }

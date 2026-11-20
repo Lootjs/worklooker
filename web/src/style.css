@@ -154,11 +154,25 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
  */
 .vacancy-actions { position: sticky; bottom: 0; z-index: 1; margin: calc(-1 * var(--space-6)) calc(-1 * var(--space-12)) calc(-1 * var(--space-6)); padding: var(--space-6) var(--space-12); border-radius: 0 0 var(--radius-card) var(--radius-card); background: linear-gradient(to top, var(--paper) calc(100% - var(--space-4)), rgba(247, 244, 238, 0)); }
 .decision-dock { display: flex; gap: var(--space-3); margin-left: auto; }
-.decision-dock button { display: inline-flex; align-items: center; gap: var(--space-2); border: 0; border-radius: var(--radius-button); padding: var(--space-3) var(--space-4); font-size: var(--text-control); font-weight: 700; white-space: nowrap; }
-.decision-dock svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.decision-dock > button, .decision-dock > a, .remove-split > button { display: inline-flex; align-items: center; gap: var(--space-2); border: 0; border-radius: var(--radius-button); padding: var(--space-3) var(--space-4); font-size: var(--text-control); font-weight: 700; text-decoration: none; white-space: nowrap; }
+/* Left of the row: "Подробнее", then how many cards wait after this one. */
+.actions-start { display: inline-flex; align-items: baseline; gap: var(--space-2); }
+.queue-remainder { color: var(--ink-meta); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+.queue-remainder::before { content: "·"; margin-right: var(--space-2); }
+/*
+ * Liked: one way out of the list. The main half sends the card back to the
+ * queue; the caret opens a menu above it with "Отклонить" in reject red.
+ */
+.remove-split { position: relative; display: inline-flex; gap: 1px; }
+.remove-split > button:first-child { border-radius: var(--radius-button) 0 0 var(--radius-button); }
+.remove-split > .remove-caret { padding: var(--space-3) 10px; border-radius: 0 var(--radius-button) var(--radius-button) 0; }
+.remove-menu { position: absolute; right: 0; bottom: calc(100% + var(--space-2)); z-index: 4; min-width: 100%; padding: 6px; border-radius: var(--radius-message); background: var(--paper); box-shadow: 0 12px 32px rgba(0,0,0,.22); animation: arrive .16s cubic-bezier(.2,.9,.2,1); }
+.remove-menu button { display: flex; width: 100%; align-items: center; gap: var(--space-2); padding: 10px var(--space-3); border: 0; border-radius: var(--radius-nav); background: transparent; color: var(--reject-red); font-size: var(--text-control); font-weight: 700; white-space: nowrap; }
+.remove-menu button:hover, .remove-menu button:focus-visible { background: var(--reject-blush); }
+.remove-menu kbd { margin-left: auto; border-color: currentColor; opacity: .7; }
+.decision-dock svg, .remove-menu svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 /* The key that does the same thing; keycaps take the button's own colour. */
 .decision-dock kbd { margin: 0 0 0 var(--space-1); border-color: currentColor; opacity: .7; }
-.link-action { display: grid; grid-template-columns: auto 1fr; gap: var(--space-2); align-items: center; justify-content: center; min-width: 0; border: 0; border-radius: var(--radius-button); padding: 17px var(--space-3); text-decoration: none; font-size: var(--text-control); font-weight: 700; }
 .reject { color: var(--reject-red); background: var(--reject-blush); }
 .reject:hover { background: var(--reject-blush-hover); }
 .like { color: var(--paper); background: var(--deep-teal); }
@@ -168,9 +182,16 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
  * Liked feed. The card nearest the middle is in focus; earlier cards blur and
  * lift away above it, later ones blur and rise from below as you scroll.
  */
-.liked-feed { position: relative; flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scroll-snap-type: y proximity; display: grid; justify-items: center; align-content: start; gap: var(--space-6); padding: 28svh clamp(16px, 5vw, 68px) 40svh; scrollbar-color: #3a434c transparent; }
+.liked-feed { position: relative; flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scroll-snap-type: y proximity; display: grid; justify-items: center; align-content: start; gap: var(--space-6); padding: 28svh clamp(16px, 5vw, 68px) 0; scrollbar-color: #3a434c transparent; }
 /* The outer box only scroll-snaps; the body carries the look and the motion. */
-.liked-card { width: min(760px, 100%); scroll-snap-align: center; }
+/*
+ * Room for the last card to reach the middle. A spacer, not bottom padding:
+ * sticky elements measure from the padding edge, so padding would lift the
+ * cards' sticky action rows halfway up the screen.
+ */
+.liked-feed::after { content: ""; height: 40svh; }
+.liked-card { width: min(760px, 100%); min-width: 0; scroll-snap-align: center; }
+.liked-card-body > * { min-width: 0; }
 .liked-card-body { display: grid; gap: var(--space-3); padding: var(--space-8); background: var(--paper); color: var(--ink); border-radius: var(--radius-card); box-shadow: 0 24px 60px rgba(0,0,0,.28); transition: filter .24s cubic-bezier(.2,.9,.2,1), opacity .24s cubic-bezier(.2,.9,.2,1), transform .32s cubic-bezier(.2,.9,.2,1); }
 .liked-card:not(.focused) { cursor: pointer; }
 .liked-card:not(.focused) .liked-card-body { filter: blur(3px); opacity: .45; }
@@ -182,8 +203,12 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
 .liked-card .reasons { margin: var(--space-1) 0 0; }
 /* Same clamp for every card: focus must not change layout, or the feed shifts as it changes. */
 .liked-card .snippet { margin: var(--space-2) 0 0; -webkit-line-clamp: 6; }
-.liked-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-3); }
-.liked-actions .link-action { display: inline-flex; padding: var(--space-3) var(--space-4); }
+/* Only the focused card expands, so the even height of the others still holds. */
+.liked-card.expanded .snippet { display: block; overflow: visible; }
+/* The liked card's action row: same sticky row as the queue, fitted to its 32px padding. */
+/* The floating "3 из 20" counter hides while a card is expanded, so the row can sit at the very bottom. */
+.liked-card .vacancy-actions { margin: 0 calc(-1 * var(--space-8)) calc(-1 * var(--space-4)); padding: var(--space-3) var(--space-8) var(--space-4); }
+.liked-card .details { margin-top: var(--space-4); }
 .secondary { padding: var(--space-3) var(--space-4); border: 0; border-radius: var(--radius-button); color: var(--ink-accent); background: var(--paper-secondary); font-size: var(--text-control); font-weight: 700; }
 .secondary:hover { background: var(--paper-secondary-hover); }
 .feed-help { position: fixed; bottom: var(--space-4); left: 50%; transform: translateX(-50%); display: flex; gap: var(--space-4); align-items: center; padding: var(--space-2) var(--space-4); border-radius: 999px; background: var(--night-help); color: var(--night-text); font-size: var(--text-meta); white-space: nowrap; box-shadow: var(--shadow-help); }
@@ -298,10 +323,16 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
   .drop-panel { padding: var(--space-4); }
   .liked-card h2 { font-size: var(--text-card-title-compact); }
   /* No keyboard on a phone: two equal buttons, no keycaps. */
-  .decision-dock { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
-  .decision-dock button { justify-content: center; }
+  .decision-dock { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .decision-dock > a .wide-only { display: none; }
+  /* The split button does not fit half a phone: liked actions take a row each. */
+  .liked-card .decision-dock { grid-template-columns: minmax(0, 1fr); }
+  .liked-card .decision-dock > a .wide-only { display: inline; }
+  .remove-split > button:first-child { min-width: 0; }
+  .decision-dock > button, .decision-dock > a { justify-content: center; }
+  .remove-split > button:first-child { flex: 1; justify-content: center; }
+  .liked-card .vacancy-actions { margin: 0 calc(-1 * var(--space-6)) calc(-1 * var(--space-3)); padding: var(--space-3) var(--space-6); }
   .decision-dock kbd { display: none; }
-  .feed-help > span:last-child { display: none; }
 }
 
 /* Source removal is a consequential preference change, so its confirmation stays in context. */

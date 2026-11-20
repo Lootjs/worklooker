@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import type { CollectionError, CollectionEvent, SavedVacancy as Vacancy, VacancyStatus as Status } from "../../src/api";
-import { ageLabel, formatDateTime } from "./format";
+import { ageLabel, formatDateTime, likedLabel } from "./format";
 import SourcesView from "./SourcesView.vue";
 
 type View = "new" | "liked" | "sources";
@@ -54,13 +54,51 @@ function fitLabel(score: number): string {
   return { strong: "сильное соответствие", good: "хорошее соответствие", review: "на просмотр" }[fitTone(score)];
 }
 
-// Liked jobs read as a scrolling feed: the card nearest the middle is in focus,
-// the others are blurred and drift away from it. Titles, authors and
-// descriptions arrive ready from the collector; the page shows them as they are.
-const likedCards = computed(() => vacancies.value.filter((vacancy) => vacancy.status === "liked"));
+/** Cards still waiting after the current one; the current card is always first. */
+const queueRemainder = computed(() => Math.max(queueCount.value - 1, 0));
+
+// Liked jobs read as a scrolling feed, freshest like first: the card nearest
+// the middle is in focus, the others are blurred and drift away from it.
+// Titles, authors and descriptions arrive ready from the collector.
+const likedCards = computed(() => vacancies.value
+  .filter((vacancy) => vacancy.status === "liked")
+  .sort((a, b) => (b.decidedAt ?? "").localeCompare(a.decidedAt ?? "")));
 const feedEl = ref<HTMLElement>();
 const focusIndex = ref(0);
 const focusedLiked = computed(() => likedCards.value[focusIndex.value]);
+/** The liked card showing its full text; only the focused one may expand. */
+const likedExpandedId = ref<string>();
+/** The liked card whose "remove" menu is open. */
+const removeMenuId = ref<string>();
+watch(focusIndex, () => {
+  // A taller card shifts the feed, so it folds back as soon as focus moves on.
+  likedExpandedId.value = undefined;
+  removeMenuId.value = undefined;
+});
+
+async function toggleLikedDetails(vacancy: Vacancy): Promise<void> {
+  const expanding = likedExpandedId.value !== vacancy.id;
+  likedExpandedId.value = expanding ? vacancy.id : undefined;
+  if (!expanding) return;
+  // Keep the card's top in view: it now grows downward, past the screen.
+  await nextTick();
+  const feed = feedEl.value;
+  const card = feedCards()[likedCards.value.findIndex((item) => item.id === vacancy.id)];
+  if (feed && card) feed.scrollTo({ top: card.offsetTop - 24, behavior: reducedMotion.matches ? "auto" : "smooth" });
+}
+
+function toggleRemoveMenu(vacancy: Vacancy): void {
+  removeMenuId.value = removeMenuId.value === vacancy.id ? undefined : vacancy.id;
+}
+function closeRemoveMenu(event: MouseEvent): void {
+  if (removeMenuId.value && !(event.target as Element | null)?.closest(".remove-split")) removeMenuId.value = undefined;
+}
+/** Out of the liked list: back to the queue at once, or rejected with the usual undo window. */
+function removeLiked(vacancy: Vacancy, to: "new" | "rejected"): void {
+  removeMenuId.value = undefined;
+  if (to === "rejected") reject(vacancy);
+  else void setStatus("new", false, vacancy);
+}
 const showFeed = computed(() => view.value === "liked" && !loading.value && likedCards.value.length > 0);
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -79,13 +117,17 @@ function onFeedScroll(): void {
     const feed = feedEl.value;
     if (!feed) return;
     const middle = feed.scrollTop + feed.clientHeight / 2;
+    const cards = feedCards();
+    // An expanded card is taller than the screen: while it spans the middle it
+    // keeps focus, even though a neighbour's centre may be nearer.
+    const spanning = cards.findIndex((element) => element.offsetTop <= middle && middle <= element.offsetTop + element.offsetHeight);
     let nearest = 0;
     let nearestDistance = Infinity;
-    feedCards().forEach((element, index) => {
+    cards.forEach((element, index) => {
       const distance = Math.abs(element.offsetTop + element.offsetHeight / 2 - middle);
       if (distance < nearestDistance) { nearest = index; nearestDistance = distance; }
     });
-    focusIndex.value = nearest;
+    focusIndex.value = spanning >= 0 ? spanning : nearest;
   });
 }
 
@@ -138,7 +180,8 @@ async function refresh(): Promise<void> {
  * window closes (or the page is closed).
  */
 const undoWindowMs = 5_000;
-type PendingReject = { vacancy: Vacancy; title: string; timer: number };
+/** `previous` is where an undo puts the card back: the queue or the liked list. */
+type PendingReject = { vacancy: Vacancy; title: string; previous: Status; timer: number };
 const pendingReject = ref<PendingReject>();
 
 function withLocalStatus(list: Vacancy[], id: string, status: Status): Vacancy[] {
@@ -152,7 +195,7 @@ function withPendingReject(list: Vacancy[]): Vacancy[] {
 function reject(target: Vacancy | undefined = current.value): void {
   if (!target) return;
   flushPendingReject();
-  pendingReject.value = { vacancy: target, title: target.title, timer: window.setTimeout(() => flushPendingReject(), undoWindowMs) };
+  pendingReject.value = { vacancy: target, title: target.title, previous: target.status, timer: window.setTimeout(() => flushPendingReject(), undoWindowMs) };
   vacancies.value = withLocalStatus(vacancies.value, target.id, "rejected");
   expanded.value = false;
 }
@@ -162,7 +205,7 @@ function undoReject(): void {
   if (!pending) return;
   window.clearTimeout(pending.timer);
   pendingReject.value = undefined;
-  vacancies.value = withLocalStatus(vacancies.value, pending.vacancy.id, "new");
+  vacancies.value = withLocalStatus(vacancies.value, pending.vacancy.id, pending.previous);
 }
 
 function flushPendingReject(keepalive = false): void {
@@ -179,7 +222,7 @@ function describeFailures(errors: CollectionError[]): string {
   for (const { sourceName, message } of errors) {
     // 4xx (except rate limits), closed previews, login walls and empty pages
     // will not fix themselves on retry.
-    const isBlocked = /HTTP 4(?!29)dd|закрыл|captcha|капч|авториз|вход/i.test(message);
+    const isBlocked = /HTTP 4(?!29)\d\d|закрыл|captcha|капч|авториз|вход/i.test(message);
     (isBlocked ? blocked : silent).push(sourceName);
   }
   return [
@@ -298,10 +341,13 @@ function onKey(event: KeyboardEvent): void {
   if (view.value === "sources") return;
   const key = event.key.toLowerCase();
   if (view.value === "liked") {
+    if (key === "escape") { removeMenuId.value = undefined; return; }
     if (key === "arrowdown" || key === "j") { event.preventDefault(); focusLiked(focusIndex.value + 1); return; }
     if (key === "arrowup" || key === "k") { event.preventDefault(); focusLiked(focusIndex.value - 1); return; }
     if (event.repeat || !focusedLiked.value) return;
-    if (key === "u" || key === "arrowleft") void setStatus("new", false, focusedLiked.value);
+    // U and X here take the focused card out of the list; undo is the toast's button.
+    if (key === "u") removeLiked(focusedLiked.value, "new");
+    if (key === "x") removeLiked(focusedLiked.value, "rejected");
     if (key === "arrowright" || key === "o") openInBackground(focusedLiked.value.url);
     return;
   }
@@ -325,10 +371,12 @@ onMounted(() => {
   void load();
   window.addEventListener("keydown", onKey);
   window.addEventListener("pagehide", onPageHide);
+  document.addEventListener("click", closeRemoveMenu);
 });
 onUnmounted(() => {
   window.removeEventListener("keydown", onKey);
   window.removeEventListener("pagehide", onPageHide);
+  document.removeEventListener("click", closeRemoveMenu);
 });
 </script>
 
@@ -361,14 +409,14 @@ onUnmounted(() => {
         v-for="(vacancy, index) in likedCards"
         :key="vacancy.id"
         class="liked-card"
-        :class="{ focused: index === focusIndex, before: index < focusIndex, after: index > focusIndex }"
+        :class="{ focused: index === focusIndex, before: index < focusIndex, after: index > focusIndex, expanded: likedExpandedId === vacancy.id }"
         :aria-current="index === focusIndex ? 'true' : undefined"
         @click.capture="onLikedCardClick($event, index)"
       >
         <!-- The visual card: blur and drift happen here, never on the snapped box. -->
         <div class="liked-card-body">
           <header class="vacancy-meta">
-            <span class="meta-line"><span class="source">{{ vacancy.sourceName }}</span><span v-if="ageLabel(vacancy)" class="age">{{ ageLabel(vacancy) }}</span></span>
+            <span class="meta-line"><span class="source">{{ vacancy.sourceName }}</span><span v-if="likedLabel(vacancy)" class="age">{{ likedLabel(vacancy) }}</span></span>
             <span class="fit" :data-tone="fitTone(vacancy.score)">{{ fitLabel(vacancy.score) }}</span>
           </header>
           <p v-if="vacancy.author" class="author">Разместил: {{ vacancy.author }}</p>
@@ -376,15 +424,31 @@ onUnmounted(() => {
           <p v-if="vacancy.company" class="company">{{ vacancy.company }}</p>
           <ul class="reasons" aria-label="Почему вакансия подошла"><li v-for="reason in vacancy.reasons" :key="reason">{{ reason }}</li></ul>
           <p class="snippet">{{ vacancy.snippet || 'Описание есть на странице вакансии.' }}</p>
-          <footer class="liked-actions">
-            <button type="button" class="secondary" :tabindex="index === focusIndex ? 0 : -1" @click="setStatus('new', false, vacancy)">Вернуть в очередь</button>
-            <a class="like link-action" :href="vacancy.url" target="_blank" rel="noreferrer" :tabindex="index === focusIndex ? 0 : -1">Открыть вакансию</a>
+          <dl v-if="likedExpandedId === vacancy.id" class="details">
+            <div><dt>Источник</dt><dd>{{ vacancy.sourceName }}</dd></div>
+            <div v-if="vacancy.publishedAt"><dt>{{ vacancy.publishedAtSource === 'source' ? 'Опубликована' : 'Найдена' }}</dt><dd>{{ formatDateTime(vacancy.publishedAt) }}</dd></div>
+            <div><dt>Последний сбор</dt><dd>{{ formatDateTime(vacancy.fetchedAt) }}</dd></div>
+            <div><dt>Ссылка</dt><dd><a class="detail-link" :href="vacancy.url" target="_blank" rel="noreferrer" :tabindex="index === focusIndex ? 0 : -1">{{ vacancy.url }}</a></dd></div>
+          </dl>
+          <!-- Same row as the queue card: details on the left, actions on the right. -->
+          <footer class="vacancy-actions">
+            <button type="button" class="details-toggle" :aria-expanded="likedExpandedId === vacancy.id" :tabindex="index === focusIndex ? 0 : -1" @click="toggleLikedDetails(vacancy)">{{ likedExpandedId === vacancy.id ? 'Свернуть' : 'Подробнее' }}</button>
+            <div class="decision-dock">
+              <!-- One way out of the list: back to the queue now, or rejected from the menu. -->
+              <div class="remove-split">
+                <button type="button" class="secondary" :tabindex="index === focusIndex ? 0 : -1" @click="removeLiked(vacancy, 'new')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></svg><span>В очередь</span><kbd aria-hidden="true">U</kbd></button>
+                <button type="button" class="secondary remove-caret" aria-label="Другие действия" aria-haspopup="menu" :aria-expanded="removeMenuId === vacancy.id" :tabindex="index === focusIndex ? 0 : -1" @click="toggleRemoveMenu(vacancy)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button>
+                <div v-if="removeMenuId === vacancy.id" class="remove-menu" role="menu">
+                  <button type="button" role="menuitem" @click="removeLiked(vacancy, 'rejected')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg><span>Отклонить</span><kbd aria-hidden="true">X</kbd></button>
+                </div>
+              </div>
+              <a class="like" :href="vacancy.url" target="_blank" rel="noreferrer" :tabindex="index === focusIndex ? 0 : -1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" /></svg><span>Открыть<span class="wide-only"> вакансию</span></span><kbd aria-hidden="true">→</kbd></a>
+            </div>
           </footer>
         </div>
       </article>
-      <div class="feed-help">
+      <div v-if="!likedExpandedId" class="feed-help">
         <span class="feed-position" aria-live="polite">{{ focusIndex + 1 }} из {{ likedCards.length }}</span>
-        <span><kbd>↑</kbd><kbd>↓</kbd> листать · <kbd>U</kbd> вернуть · <kbd>→</kbd> открыть</span>
       </div>
     </section>
 
@@ -425,7 +489,10 @@ onUnmounted(() => {
           </div>
           <!-- Actions live inside the card, like the liked feed: details on the left, the decision on the right. -->
           <footer class="vacancy-actions">
-            <button type="button" class="details-toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? 'Свернуть' : 'Подробнее' }}</button>
+            <span class="actions-start">
+              <button type="button" class="details-toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? 'Свернуть' : 'Подробнее' }}</button>
+              <span class="queue-remainder">{{ queueRemainder ? `ещё ${queueRemainder}` : 'последняя' }}</span>
+            </span>
             <div class="decision-dock">
               <button class="reject" aria-label="Отклонить вакансию" @click="reject()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg><span>Отклонить</span><kbd aria-hidden="true">←</kbd></button>
               <button class="like" aria-label="Сохранить и открыть вакансию" @click="setStatus('liked', true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.9-8.6a5.5 5.5 0 0 0-.1-7.8Z" /></svg><span>Сохранить</span><kbd aria-hidden="true">→</kbd></button>
@@ -437,7 +504,8 @@ onUnmounted(() => {
 
     <div v-if="pendingReject" :key="pendingReject.vacancy.id" class="undo-toast" role="status">
       <p>Отклонено: <strong>{{ pendingReject.title }}</strong></p>
-      <button type="button" @click="undoReject">Вернуть <kbd>U</kbd></button>
+      <!-- In the liked list U sends a card to the queue, so undo is the button alone there. -->
+      <button type="button" @click="undoReject">Вернуть <kbd v-if="view !== 'liked'">U</kbd></button>
       <span class="undo-timer" aria-hidden="true" :style="{ animationDuration: `${undoWindowMs}ms` }"></span>
     </div>
   </main>
