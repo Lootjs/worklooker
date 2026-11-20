@@ -54,9 +54,6 @@ function fitLabel(score: number): string {
   return { strong: "сильное соответствие", good: "хорошее соответствие", review: "на просмотр" }[fitTone(score)];
 }
 
-/** Cards still waiting after the current one; the current card is always first. */
-const queueRemainder = computed(() => Math.max(queueCount.value - 1, 0));
-
 // Liked jobs read as a scrolling feed, freshest like first: the card nearest
 // the middle is in focus, the others are blurred and drift away from it.
 // Titles, authors and descriptions arrive ready from the collector.
@@ -489,10 +486,7 @@ onUnmounted(() => {
           </div>
           <!-- Actions live inside the card, like the liked feed: details on the left, the decision on the right. -->
           <footer class="vacancy-actions">
-            <span class="actions-start">
-              <button type="button" class="details-toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? 'Свернуть' : 'Подробнее' }}</button>
-              <span class="queue-remainder">{{ queueRemainder ? `ещё ${queueRemainder}` : 'последняя' }}</span>
-            </span>
+            <button type="button" class="details-toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? 'Свернуть' : 'Подробнее' }}</button>
             <div class="decision-dock">
               <button class="reject" aria-label="Отклонить вакансию" @click="reject()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg><span>Отклонить</span><kbd aria-hidden="true">←</kbd></button>
               <button class="like" aria-label="Сохранить и открыть вакансию" @click="setStatus('liked', true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.9-8.6a5.5 5.5 0 0 0-.1-7.8Z" /></svg><span>Сохранить</span><kbd aria-hidden="true">→</kbd></button>

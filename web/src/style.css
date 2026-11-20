@@ -155,10 +155,6 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
 .vacancy-actions { position: sticky; bottom: 0; z-index: 1; margin: calc(-1 * var(--space-6)) calc(-1 * var(--space-12)) calc(-1 * var(--space-6)); padding: var(--space-6) var(--space-12); border-radius: 0 0 var(--radius-card) var(--radius-card); background: linear-gradient(to top, var(--paper) calc(100% - var(--space-4)), rgba(247, 244, 238, 0)); }
 .decision-dock { display: flex; gap: var(--space-3); margin-left: auto; }
 .decision-dock > button, .decision-dock > a, .remove-split > button { display: inline-flex; align-items: center; gap: var(--space-2); border: 0; border-radius: var(--radius-button); padding: var(--space-3) var(--space-4); font-size: var(--text-control); font-weight: 700; text-decoration: none; white-space: nowrap; }
-/* Left of the row: "Подробнее", then how many cards wait after this one. */
-.actions-start { display: inline-flex; align-items: baseline; gap: var(--space-2); }
-.queue-remainder { color: var(--ink-meta); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
-.queue-remainder::before { content: "·"; margin-right: var(--space-2); }
 /*
  * Liked: one way out of the list. The main half sends the card back to the
  * queue; the caret opens a menu above it with "Отклонить" in reject red.
