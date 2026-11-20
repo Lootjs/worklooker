@@ -132,17 +132,28 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
 .company { margin: var(--space-3) 0 0; font-size: var(--text-lead); font-weight: 700; color: var(--ink-company); }
 .reasons { display: flex; gap: var(--space-2); flex-wrap: wrap; padding: 0; margin: var(--space-6) 0 0; list-style: none; }
 .reasons li { color: var(--chip-ink); background: var(--chip-mint); padding: 6px 10px; border-radius: 999px; font-size: var(--text-meta); font-weight: 700; }
-.snippet { display: -webkit-box; max-width: 65ch; margin: var(--space-6) 0 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 6; font-size: var(--text-body); line-height: 1.6; color: var(--ink-body); white-space: pre-line; text-wrap: pretty; }
+/*
+ * The description is its own disclosure. Folded, it shows six lines and its
+ * last two and a half dissolve into the paper: the letters fade (a mask), the
+ * paper is never laid over them, so the text visibly goes on. The fade ends at
+ * 10% so the tail is still felt. On hover the fade recedes by a line.
+ * --fade-lines is a registered number, so the mask can ease between its
+ * positions; a length would not do, since an initial value in em is invalid.
+ */
+@property --fade-lines { syntax: "<number>"; inherits: false; initial-value: 2.5; }
+.snippet { display: block; width: 100%; max-width: 65ch; margin: var(--space-6) 0 0; padding: 0; border: 0; background: transparent; color: var(--ink-body); font-size: var(--text-body); line-height: 1.6; text-align: left; white-space: pre-line; text-wrap: pretty; cursor: pointer; }
+.snippet-text { --fade-lines: 2.5; display: block; overflow: hidden; max-height: calc(6 * 1.6em); transition: max-height .32s cubic-bezier(.2,.9,.2,1), --fade-lines .5s cubic-bezier(.25,.8,.25,1); }
+.snippet-text.is-clipped { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade-lines) * 1.6em), rgba(0,0,0,.6) calc(100% - var(--fade-lines) * .8em), rgba(0,0,0,.1) 100%); mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade-lines) * 1.6em), rgba(0,0,0,.6) calc(100% - var(--fade-lines) * .8em), rgba(0,0,0,.1) 100%); }
+.snippet:hover .snippet-text { --fade-lines: 1.5; }
+.snippet:focus-visible { outline-offset: 6px; border-radius: 6px; }
+.vacancy.expanded .snippet-text, .liked-card.expanded .snippet-text { max-height: 400em; -webkit-mask-image: none; mask-image: none; }
 .vacancy.expanded .copy { align-self: stretch; }
 .vacancy.expanded h1 { display: block; overflow: visible; }
-.vacancy.expanded .snippet { display: block; overflow: visible; }
 .details { display: grid; gap: var(--space-3); margin: var(--space-8) 0 0; padding: var(--space-4) 0 0; border-top: 1px solid var(--paper-line); color: var(--ink-body); font-size: var(--text-control); line-height: 1.45; }
 .details div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--space-3); }
 .details dt { color: var(--ink-meta); font-weight: 700; }
 .details dd { margin: 0; overflow-wrap: anywhere; }
 .detail-link { color: var(--ink-accent); font-weight: 700; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-.details-toggle { justify-self: start; padding: var(--space-2) 0; border: 0; background: transparent; color: var(--ink-accent); font-size: var(--text-control); font-weight: 700; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 4px; }
-.details-toggle:hover { text-decoration-thickness: 2px; }
 
 /* Card footer: "Подробнее" on the left, the decision on the right — the liked feed's layout, at every width. */
 .vacancy-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3) var(--space-4); }
@@ -197,10 +208,11 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
 .liked-card h2 { font-size: var(--text-card-title); line-height: 1.1; letter-spacing: -.02em; }
 .liked-card .company { margin: 0; }
 .liked-card .reasons { margin: var(--space-1) 0 0; }
-/* Same clamp for every card: focus must not change layout, or the feed shifts as it changes. */
-.liked-card .snippet { margin: var(--space-2) 0 0; -webkit-line-clamp: 6; }
-/* Only the focused card expands, so the even height of the others still holds. */
-.liked-card.expanded .snippet { display: block; overflow: visible; }
+/*
+ * Every folded card shows the same six lines, so focus never changes layout
+ * and the feed does not shift. Only the focused card expands.
+ */
+.liked-card .snippet { margin: var(--space-2) 0 0; }
 /* The liked card's action row: same sticky row as the queue, fitted to its 32px padding. */
 /* The floating "3 из 20" counter hides while a card is expanded, so the row can sit at the very bottom. */
 .liked-card .vacancy-actions { margin: 0 calc(-1 * var(--space-8)) calc(-1 * var(--space-4)); padding: var(--space-3) var(--space-8) var(--space-4); }

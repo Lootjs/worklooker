@@ -6,6 +6,27 @@ import SourcesView from "./SourcesView.vue";
 
 type View = "new" | "liked" | "sources";
 
+/**
+ * Marks a description cut off by its folded height, so only text that really
+ * continues gets the dissolving last lines. Rechecked whenever its size changes.
+ */
+const clippedObservers = new WeakMap<HTMLElement, ResizeObserver>();
+function markClipped(element: HTMLElement): void {
+  element.classList.toggle("is-clipped", element.scrollHeight > element.clientHeight + 1);
+}
+const vClipped = {
+  mounted(element: HTMLElement): void {
+    markClipped(element);
+    const observer = new ResizeObserver(() => markClipped(element));
+    observer.observe(element);
+    clippedObservers.set(element, observer);
+  },
+  updated: markClipped,
+  unmounted(element: HTMLElement): void {
+    clippedObservers.get(element)?.disconnect();
+  },
+};
+
 const view = ref<View>("new");
 const vacancies = ref<Vacancy[]>([]);
 const loading = ref(true);
@@ -422,16 +443,18 @@ onUnmounted(() => {
           <h2>{{ vacancy.title }}</h2>
           <p v-if="vacancy.company" class="company">{{ vacancy.company }}</p>
           <ul class="reasons" aria-label="Почему вакансия подошла"><li v-for="reason in vacancy.reasons" :key="reason">{{ reason }}</li></ul>
-          <p class="snippet">{{ vacancy.snippet || 'Описание есть на странице вакансии.' }}</p>
+          <!-- The description is its own disclosure: its last lines dissolve while folded. -->
+          <button type="button" class="snippet" :aria-expanded="likedExpandedId === vacancy.id" :tabindex="index === focusIndex ? 0 : -1" @click="toggleLikedDetails(vacancy)">
+            <span v-clipped class="snippet-text">{{ vacancy.snippet || 'Описание есть на странице вакансии.' }}</span>
+          </button>
           <dl v-if="likedExpandedId === vacancy.id" class="details">
             <div><dt>Источник</dt><dd>{{ vacancy.sourceName }}</dd></div>
             <div v-if="vacancy.publishedAt"><dt>{{ vacancy.publishedAtSource === 'source' ? 'Опубликована' : 'Найдена' }}</dt><dd>{{ formatDateTime(vacancy.publishedAt) }}</dd></div>
             <div><dt>Последний сбор</dt><dd>{{ formatDateTime(vacancy.fetchedAt) }}</dd></div>
             <div><dt>Ссылка</dt><dd><a class="detail-link" :href="vacancy.url" target="_blank" rel="noreferrer" :tabindex="index === focusIndex ? 0 : -1">{{ vacancy.url }}</a></dd></div>
           </dl>
-          <!-- Same row as the queue card: details on the left, actions on the right. -->
+          <!-- Same row as the queue card: the actions, on the right. -->
           <footer class="vacancy-actions">
-            <button type="button" class="details-toggle" :aria-expanded="likedExpandedId === vacancy.id" :tabindex="index === focusIndex ? 0 : -1" @click="toggleLikedDetails(vacancy)">{{ likedExpandedId === vacancy.id ? 'Свернуть' : 'Подробнее' }}</button>
             <div class="decision-dock">
               <!-- One way out of the list: back to the queue now, or rejected from the menu. -->
               <div class="remove-split">
@@ -478,7 +501,10 @@ onUnmounted(() => {
             <h1>{{ current.title }}</h1>
             <p v-if="current.company" class="company">{{ current.company }}</p>
             <ul class="reasons" aria-label="Почему вакансия в очереди"><li v-for="reason in current.reasons" :key="reason">{{ reason }}</li></ul>
-            <p class="snippet">{{ current.snippet || 'Описание есть на странице вакансии.' }}</p>
+            <!-- The description is its own disclosure: its last lines dissolve while folded. -->
+            <button type="button" class="snippet" :aria-expanded="expanded" @click="expanded = !expanded">
+              <span v-clipped class="snippet-text">{{ current.snippet || 'Описание есть на странице вакансии.' }}</span>
+            </button>
             <dl v-if="expanded" class="details">
               <div><dt>Источник</dt><dd>{{ current.sourceName }}</dd></div>
               <div v-if="current.publishedAt"><dt>{{ current.publishedAtSource === 'source' ? 'Опубликована' : 'Найдена' }}</dt><dd>{{ formatDateTime(current.publishedAt) }}</dd></div>
@@ -486,9 +512,8 @@ onUnmounted(() => {
               <div><dt>Ссылка</dt><dd><a class="detail-link" :href="current.url" target="_blank" rel="noreferrer">{{ current.url }}</a></dd></div>
             </dl>
           </div>
-          <!-- Actions live inside the card, like the liked feed: details on the left, the decision on the right. -->
+          <!-- Actions live inside the card, like the liked feed: the decision on the right. -->
           <footer class="vacancy-actions">
-            <button type="button" class="details-toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? 'Свернуть' : 'Подробнее' }}</button>
             <div class="decision-dock">
               <button class="reject" aria-label="Отклонить вакансию" @click="reject()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg><span>Отклонить</span><kbd aria-hidden="true">←</kbd></button>
               <button class="like" aria-label="Сохранить и открыть вакансию" @click="setStatus('liked', true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.9-8.6a5.5 5.5 0 0 0-.1-7.8Z" /></svg><span>Сохранить</span><kbd aria-hidden="true">→</kbd></button>
