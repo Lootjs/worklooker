@@ -8,6 +8,7 @@
   "scripts": {
     "collect": "tsx src/index.ts",
     "check": "tsc --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\"",
     "build": "vite build",
     "dev": "concurrently -n api,web -c cyan,magenta \"pnpm dev:api\" \"pnpm dev:web\"",
     "dev:api": "tsx watch src/server.ts",

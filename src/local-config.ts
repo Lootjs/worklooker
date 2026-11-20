@@ -23,6 +23,15 @@ export interface MatchProfile {
   preferRussian: boolean;
   /** Minimum score to enter the queue; 6 keeps remote senior roles in your field. */
   minScore: number;
+  /** Roles you never take, matched in the title only: `junior`, `стажёр*`. */
+  excludeRoles?: string[];
+  /** Industries or companies you never take, matched anywhere in the text: `гемблинг*`. */
+  blockers?: string[];
+  /**
+   * Drop vacancies that require working from Russia or come from a Russian
+   * employer: "удалённо по РФ", "по ТК РФ", "аккредитованная IT-компания", «ООО».
+   */
+  excludeRussia?: boolean;
 }
 
 /** Machine-specific settings, kept out of Git. */
@@ -67,6 +76,15 @@ function checkProfile(profile: MatchProfile, path: string): MatchProfile {
     throw new Error(`${path}: profile.remoteOnly и profile.preferRussian должны быть true или false`);
   }
   if (typeof profile.minScore !== "number") throw new Error(`${path}: profile.minScore должен быть числом`);
+  for (const key of ["excludeRoles", "blockers"] as const) {
+    const list = profile[key];
+    if (list !== undefined && (!Array.isArray(list) || list.some((item) => typeof item !== "string"))) {
+      throw new Error(`${path}: profile.${key} должен быть списком строк`);
+    }
+  }
+  if (profile.excludeRussia !== undefined && typeof profile.excludeRussia !== "boolean") {
+    throw new Error(`${path}: profile.excludeRussia должен быть true или false`);
+  }
   return profile;
 }
 

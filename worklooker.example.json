@@ -8,7 +8,10 @@
     "skills": ["JavaScript", "TypeScript", "Vue", "Vite", "Svelte"],
     "remoteOnly": true,
     "preferRussian": true,
-    "minScore": 6
+    "minScore": 6,
+    "excludeRoles": ["junior", "intern", "стажёр*", "стажер*"],
+    "blockers": [],
+    "excludeRussia": false
   },
   "disabledSources": []
 }
