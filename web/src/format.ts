@@ -4,6 +4,18 @@ export function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
+/** Short and relative where it helps: "сегодня, 15:59", "вчера, 09:10", "18 нояб., 15:59". */
+export function formatWhen(value: string, now = new Date()): string {
+  const date = new Date(value);
+  const time = new Intl.DateTimeFormat("ru-RU", { timeStyle: "short" }).format(date);
+  const day = (moment: Date) => new Date(moment.getFullYear(), moment.getMonth(), moment.getDate()).getTime();
+  const daysAgo = Math.round((day(now) - day(date)) / 86_400_000);
+  if (daysAgo === 0) return `сегодня, ${time}`;
+  if (daysAgo === 1) return `вчера, ${time}`;
+  const sameYear = date.getFullYear() === now.getFullYear();
+  return `${new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) }).format(date)}, ${time}`;
+}
+
 /** Russian noun form for a count: 1 лайк, 3 лайка, 5 лайков. */
 export function plural(count: number, one: string, few: string, many: string): string {
   const lastTwo = count % 100;

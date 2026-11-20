@@ -405,7 +405,7 @@ onUnmounted(() => {
         </template>
       </div>
       <div v-else class="card-stack" :key="current.id">
-        <article class="vacancy" :class="{ expanded }" @click="expanded = !expanded">
+        <article class="vacancy" :class="{ expanded }">
           <header class="vacancy-meta">
             <span class="meta-line"><span class="source">{{ current.sourceName }}</span><span v-if="ageLabel(current)" class="age">{{ ageLabel(current) }}</span></span>
             <span class="fit" :data-tone="fitTone(current.score)">{{ fitLabel(current.score) }}</span>
@@ -420,15 +420,18 @@ onUnmounted(() => {
               <div><dt>Источник</dt><dd>{{ current.sourceName }}</dd></div>
               <div v-if="current.publishedAt"><dt>{{ current.publishedAtSource === 'source' ? 'Опубликована' : 'Найдена' }}</dt><dd>{{ formatDateTime(current.publishedAt) }}</dd></div>
               <div><dt>Последний сбор</dt><dd>{{ formatDateTime(current.fetchedAt) }}</dd></div>
-              <div><dt>Ссылка</dt><dd><a class="detail-link" :href="current.url" target="_blank" rel="noreferrer" @click.stop>{{ current.url }}</a></dd></div>
+              <div><dt>Ссылка</dt><dd><a class="detail-link" :href="current.url" target="_blank" rel="noreferrer">{{ current.url }}</a></dd></div>
             </dl>
           </div>
-          <button type="button" class="details-toggle" :aria-expanded="expanded" @click.stop="expanded = !expanded">{{ expanded ? 'Свернуть' : 'Подробнее' }}</button>
+          <!-- Actions live inside the card, like the liked feed: details on the left, the decision on the right. -->
+          <footer class="vacancy-actions">
+            <button type="button" class="details-toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? 'Свернуть' : 'Подробнее' }}</button>
+            <div class="decision-dock">
+              <button class="reject" aria-label="Отклонить вакансию" @click="reject()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg><span>Отклонить</span><kbd aria-hidden="true">←</kbd></button>
+              <button class="like" aria-label="Сохранить и открыть вакансию" @click="setStatus('liked', true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.9-8.6a5.5 5.5 0 0 0-.1-7.8Z" /></svg><span>Сохранить</span><kbd aria-hidden="true">→</kbd></button>
+            </div>
+          </footer>
         </article>
-        <div class="decision-dock" @click.stop>
-          <button class="reject" aria-label="Отклонить вакансию" @click="reject()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg><span>Отклонить</span></button>
-          <button class="like" aria-label="Сохранить и открыть вакансию" @click="setStatus('liked', true)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.9-8.6a5.5 5.5 0 0 0-.1-7.8Z" /></svg><span>Сохранить</span></button>
-        </div>
       </div>
     </section>
 
