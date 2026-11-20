@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
 type Status = "new" | "liked" | "rejected";
-type Vacancy = { id: string; title: string; author?: string; company?: string; sourceName: string; url: string; snippet: string; fetchedAt: string; score: number; reasons: string[]; status: Status };
+type Vacancy = { id: string; title: string; author?: string; company?: string; sourceName: string; url: string; snippet: string; fetchedAt: string; publishedAt?: string; publishedAtSource?: "source" | "collector"; score: number; reasons: string[]; status: Status };
 type View = "new" | "liked";
 
 const view = ref<View>("new");
@@ -277,6 +277,19 @@ function formatFetchedAt(value: string): string {
   return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
+/** "опубликована 3 дня назад" when the source dates it, "найдена …" when only we do. */
+function ageLabel(vacancy: Vacancy): string | undefined {
+  if (!vacancy.publishedAt) return undefined;
+  const verb = vacancy.publishedAtSource === "source" ? "опубликована" : "найдена";
+  const days = Math.floor((Date.now() - new Date(vacancy.publishedAt).getTime()) / 86_400_000);
+  if (days <= 0) return `${verb} сегодня`;
+  if (days === 1) return `${verb} вчера`;
+  const lastTwo = days % 100;
+  const last = days % 10;
+  const unit = lastTwo >= 11 && lastTwo <= 14 ? "дней" : last === 1 ? "день" : last >= 2 && last <= 4 ? "дня" : "дней";
+  return `${verb} ${days} ${unit} назад`;
+}
+
 type CollectionEvent =
   | { type: "start"; total: number }
   | { type: "source"; sourceName: string; done: number; total: number; added: number; error?: string }
@@ -401,7 +414,7 @@ onUnmounted(() => {
         <!-- The visual card: blur and drift happen here, never on the snapped box. -->
         <div class="liked-card-body">
           <header class="vacancy-meta">
-            <span class="source">{{ vacancy.sourceName }}</span>
+            <span class="meta-line"><span class="source">{{ vacancy.sourceName }}</span><span v-if="ageLabel(vacancy)" class="age">{{ ageLabel(vacancy) }}</span></span>
             <span class="fit" :data-tone="fitTone(vacancy.score)">{{ fitLabel(vacancy.score) }}</span>
           </header>
           <p v-if="text.author" class="author">Разместил: {{ text.author }}</p>
@@ -438,7 +451,7 @@ onUnmounted(() => {
       <div v-else class="card-stack" :key="current.id">
         <article class="vacancy" :class="{ expanded }" @click="expanded = !expanded">
           <header class="vacancy-meta">
-            <span class="source">{{ current.sourceName }}</span>
+            <span class="meta-line"><span class="source">{{ current.sourceName }}</span><span v-if="ageLabel(current)" class="age">{{ ageLabel(current) }}</span></span>
             <span class="fit" :data-tone="fitTone(current.score)">{{ fitLabel(current.score) }}</span>
           </header>
           <div class="copy">
@@ -449,7 +462,8 @@ onUnmounted(() => {
             <p class="snippet">{{ card?.snippet || 'Описание есть на странице вакансии.' }}</p>
             <dl v-if="expanded" class="details">
               <div><dt>Источник</dt><dd>{{ current.sourceName }}</dd></div>
-              <div><dt>Добавлено</dt><dd>{{ formatFetchedAt(current.fetchedAt) }}</dd></div>
+              <div v-if="current.publishedAt"><dt>{{ current.publishedAtSource === 'source' ? 'Опубликована' : 'Найдена' }}</dt><dd>{{ formatFetchedAt(current.publishedAt) }}</dd></div>
+              <div><dt>Последний сбор</dt><dd>{{ formatFetchedAt(current.fetchedAt) }}</dd></div>
               <div><dt>Ссылка</dt><dd><a class="detail-link" :href="current.url" target="_blank" rel="noreferrer" @click.stop>{{ current.url }}</a></dd></div>
             </dl>
           </div>

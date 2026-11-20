@@ -1,3 +1,4 @@
+import { sourcePublished } from "./dates.js";
 import { decodeEntities, fetchText, htmlToText } from "./structured-data.js";
 import type { Source, Vacancy } from "./types.js";
 
@@ -15,6 +16,8 @@ interface GreenhouseJob {
   content?: string;
   location?: { name?: string };
   departments?: Array<{ name?: string }>;
+  /** `updated_at` changes on any edit, so only this one is a publication date. */
+  first_published?: string;
   metadata?: Array<{ value_type?: string; value?: { unit?: string; min_value?: string; max_value?: string } }> | null;
 }
 
@@ -64,6 +67,7 @@ export async function scrapeGreenhouse(source: Source): Promise<Vacancy[]> {
       // Greenhouse has no work-format field; a location named "… - Remote" is
       // the only structured signal, and its absence proves nothing.
       ...(locations.some((place) => /remote/i.test(place)) ? { remote: true } : {}),
+      ...sourcePublished(job.first_published),
       fetchedAt: new Date().toISOString(),
     }];
   });

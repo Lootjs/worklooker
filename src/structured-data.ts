@@ -1,3 +1,4 @@
+import { sourcePublished } from "./dates.js";
 import { tidyLines } from "./scrape.js";
 import type { RatedVacancy, Source, Vacancy } from "./types.js";
 
@@ -22,6 +23,7 @@ interface Place {
 interface JobPosting {
   title?: string;
   description?: string;
+  datePosted?: string;
   jobLocationType?: string;
   jobLocation?: Place | Place[];
   hiringOrganization?: { name?: string };
@@ -170,7 +172,7 @@ export async function withJobPostings<T extends Vacancy>(vacancies: T[]): Promis
       const snippet = [conditions(posting), htmlToText(posting.description ?? "")].filter(Boolean).join("\n\n");
       // Only TELECOMMUTE is explicit; sites often omit the field for office jobs.
       const remote = posting.jobLocationType === "TELECOMMUTE" ? { remote: true } : {};
-      enriched[index] = { ...vacancy, ...(title ? { title } : {}), ...(company ? { company } : {}), ...remote, snippet: (snippet || vacancy.snippet).slice(0, 4_000) };
+      enriched[index] = { ...vacancy, ...(title ? { title } : {}), ...(company ? { company } : {}), ...remote, ...sourcePublished(posting.datePosted), snippet: (snippet || vacancy.snippet).slice(0, 4_000) };
     } catch (error) {
       // Rate-limited: stop asking, the rest keep their listing summaries.
       if (error instanceof HttpError && error.status === 429) break;

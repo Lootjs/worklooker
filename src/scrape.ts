@@ -1,7 +1,9 @@
 import { chromium, type Browser, type Page } from "playwright";
+import { sourcePublished } from "./dates.js";
 import type { Source, Vacancy } from "./types.js";
 
-type LinkCandidate = { href: string; text: string; title?: string; company?: string };
+/** `date` is the post's own time, where the page shows it (Telegram previews). */
+type LinkCandidate = { href: string; text: string; title?: string; company?: string; date?: string };
 
 // JavaScript's `\b` only understands ASCII, so Cyrillic words need explicit
 // Unicode boundaries.
@@ -87,7 +89,7 @@ function cardDetails(text: string, shown: Array<string | undefined>): string {
 
 function uniqueByUrl(candidates: LinkCandidate[], source: Source): Vacancy[] {
   const seen = new Set<string>();
-  return candidates.flatMap(({ href, text, title, company }) => {
+  return candidates.flatMap(({ href, text, title, company, date }) => {
     const url = absoluteUrl(href, source.url);
     const cleaned = text.replace(/\s+/g, " ").trim();
     // A digest is a bundle of several jobs: keeping it as one vacancy would
@@ -113,6 +115,7 @@ function uniqueByUrl(candidates: LinkCandidate[], source: Source): Vacancy[] {
       url,
       snippet: formatted.snippet,
       remoteByDefault: source.remoteByDefault,
+      ...sourcePublished(date),
       fetchedAt: new Date().toISOString(),
     }];
   });
@@ -140,7 +143,8 @@ async function scrapeTelegramPreview(page: Page, source: Source): Promise<LinkCa
         const permalink = item.querySelector("a.tgme_widget_message_date") as HTMLAnchorElement | null;
         const messageText = item.querySelector(".tgme_widget_message_text") as HTMLElement | null;
         const text = messageText?.innerText.trim() ?? "";
-        return permalink?.href && text ? [{ href: permalink.href, text }] : [];
+        const date = permalink?.querySelector("time")?.getAttribute("datetime") ?? undefined;
+        return permalink?.href && text ? [{ href: permalink.href, text, date }] : [];
       }),
     ));
     const older = await page.locator('a.tme_messages_more[href*="before="]').first().getAttribute("href", { timeout: 1_000 }).catch(() => null);

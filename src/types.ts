@@ -43,6 +43,12 @@ export interface Source {
   format?: "json-ld" | "rss" | "tribe" | "tilda-feed" | "peopleforce" | "greenhouse" | "ashby";
   /** The supplied URLs already select remote vacancies where the source supports it. */
   remoteByDefault: boolean;
+  /**
+   * A feed of posts, such as a Telegram channel: posts stay after the vacancy
+   * closes, so vacancies older than the profile's `maxAgeDays` are dropped.
+   * Career boards list only open vacancies and keep long-open ones.
+   */
+  keepsClosedPosts?: boolean;
   /** Paths which identify a vacancy detail link on this particular source. */
   vacancyPathPatterns: RegExp[];
 }
@@ -63,7 +69,14 @@ export interface Vacancy {
    * matcher looks for remote wording in the text.
    */
   remote?: boolean;
+  /** When the last collection saw it. */
   fetchedAt: string;
+  /**
+   * When it was published: from the source when it says (`"source"`),
+   * otherwise when Worklooker first collected it (`"collector"`).
+   */
+  publishedAt?: string;
+  publishedAtSource?: "source" | "collector";
 }
 
 export interface RatedVacancy extends Vacancy {

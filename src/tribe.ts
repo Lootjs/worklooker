@@ -1,3 +1,4 @@
+import { sourcePublished } from "./dates.js";
 import { htmlToText } from "./structured-data.js";
 import type { Source, Vacancy } from "./types.js";
 
@@ -21,6 +22,8 @@ interface TribeVacancy {
   work_locations?: Attribute[];
   grades?: Attribute[];
   functions?: Attribute[];
+  /** When the vacancy was opened in Huntflow, the ATS behind the site. */
+  created_at_huntflow?: string;
 }
 
 interface TribePage {
@@ -69,6 +72,7 @@ export async function scrapeTribe(source: Source): Promise<Vacancy[]> {
         remoteByDefault: source.remoteByDefault,
         // Several formats may be offered; remote among them is enough.
         ...(formats.length ? { remote: formats.some((format) => /remote/i.test(format)) } : {}),
+        ...sourcePublished(vacancy.created_at_huntflow),
         fetchedAt: new Date().toISOString(),
       });
     }

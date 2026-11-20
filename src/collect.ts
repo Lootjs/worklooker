@@ -12,6 +12,7 @@ import { scrapeTildaFeed } from "./tilda.js";
 import { scrapeTribe } from "./tribe.js";
 import { mergeSourceVacancies, pruneRemovedSources } from "./store.js";
 import { scrapeWantApplyBot, wantApplyBotIsReady } from "./telegram.js";
+import { isStale } from "./dates.js";
 import type { RatedVacancy, Source, Vacancy } from "./types.js";
 
 export interface CollectionResult {
@@ -74,7 +75,10 @@ export async function collectVacancies(onEvent: (event: CollectionEvent) => void
       let error: string | undefined;
       let sourceAdded = 0;
       try {
-        const rate = (vacancies: Vacancy[]): RatedVacancy[] => vacancies.map(rateVacancy).filter((vacancy): vacancy is RatedVacancy => vacancy !== undefined);
+        const rate = (vacancies: Vacancy[]): RatedVacancy[] => vacancies
+          .filter((vacancy) => !(source.keepsClosedPosts && isStale(vacancy.publishedAt, profile.maxAgeDays)))
+          .map(rateVacancy)
+          .filter((vacancy): vacancy is RatedVacancy => vacancy !== undefined);
         if (source.format === "json-ld") {
           // Decides itself which vacancy pages to read before rating.
           matched = await collectJsonLd(source, rate);

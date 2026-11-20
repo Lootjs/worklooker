@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { TelegramClient } from "teleproto";
 import { StringSession } from "teleproto/sessions";
+import { sourcePublished } from "./dates.js";
 import { wantApplyBotSource } from "./sources.js";
 import type { Vacancy } from "./types.js";
 
@@ -76,6 +77,8 @@ export async function scrapeWantApplyBot(): Promise<Vacancy[]> {
         url,
         snippet: text.slice(0, 1_500),
         remoteByDefault: false,
+        // Telegram dates are Unix seconds.
+        ...sourcePublished(message.date ? message.date * 1_000 : undefined),
         fetchedAt: new Date().toISOString(),
       });
     }

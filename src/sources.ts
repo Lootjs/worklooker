@@ -11,6 +11,7 @@ function telegramSource(id: string, name: string, handle: string, remoteByDefaul
     // The /s/ preview is public and exposes individual message links for collection.
     url: `https://t.me/s/${handle}`,
     remoteByDefault,
+    keepsClosedPosts: true,
     // Telegram's preview page uses /s/channel, while its message permalink is
     // /channel/message-id. Keep the permalink, not an arbitrary outbound link.
     vacancyPathPatterns: [new RegExp(`^/(?:s/)?${handle}/\\d+$`)],
@@ -260,5 +261,6 @@ export const wantApplyBotSource: Source = {
   name: "WantApply bot",
   url: "https://t.me/wantapply_bot",
   remoteByDefault: false,
+  keepsClosedPosts: true,
   vacancyPathPatterns: [],
 };

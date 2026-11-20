@@ -11,7 +11,8 @@
     "minScore": 6,
     "excludeRoles": ["junior", "intern", "стажёр*", "стажер*"],
     "blockers": [],
-    "excludeRussia": false
+    "excludeRussia": false,
+    "maxAgeDays": 30
   },
   "disabledSources": []
 }

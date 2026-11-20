@@ -1,3 +1,4 @@
+import { sourcePublished } from "./dates.js";
 import { fetchText, htmlToText } from "./structured-data.js";
 import type { Source, Vacancy } from "./types.js";
 
@@ -13,6 +14,7 @@ interface AshbyJob {
   title?: string;
   jobUrl?: string;
   isListed?: boolean;
+  publishedAt?: string;
   /** True for hybrid jobs as well; see `isRemote()`. */
   isRemote?: boolean | null;
   workplaceType?: string | null;
@@ -77,6 +79,7 @@ export async function scrapeAshby(source: Source): Promise<Vacancy[]> {
       snippet: [conditions, description].filter(Boolean).join("\n\n").slice(0, 4_000),
       remoteByDefault: source.remoteByDefault,
       ...(job.workplaceType ? { remote: isRemote(job) } : {}),
+      ...sourcePublished(job.publishedAt),
       fetchedAt: new Date().toISOString(),
     }];
   });

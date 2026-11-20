@@ -32,6 +32,11 @@ export interface MatchProfile {
    * employer: "удалённо по РФ", "по ТК РФ", "аккредитованная IT-компания", «ООО».
    */
   excludeRussia?: boolean;
+  /**
+   * Drop vacancies from feeds of posts (Telegram channels) published more than
+   * this many days ago. Career boards list only open vacancies and are kept.
+   */
+  maxAgeDays?: number;
 }
 
 /** Machine-specific settings, kept out of Git. */
@@ -81,6 +86,9 @@ function checkProfile(profile: MatchProfile, path: string): MatchProfile {
     if (list !== undefined && (!Array.isArray(list) || list.some((item) => typeof item !== "string"))) {
       throw new Error(`${path}: profile.${key} должен быть списком строк`);
     }
+  }
+  if (profile.maxAgeDays !== undefined && (typeof profile.maxAgeDays !== "number" || profile.maxAgeDays <= 0)) {
+    throw new Error(`${path}: profile.maxAgeDays должен быть положительным числом`);
   }
   if (profile.excludeRussia !== undefined && typeof profile.excludeRussia !== "boolean") {
     throw new Error(`${path}: profile.excludeRussia должен быть true или false`);

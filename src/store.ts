@@ -26,9 +26,23 @@ export function vacancyId(vacancy: Pick<RatedVacancy, "title" | "company" | "sou
   return Buffer.from(`${normalize(vacancy.title)}|${normalize(vacancy.company ?? vacancy.source)}`).toString("base64url");
 }
 
+/**
+ * The publication date to keep when a vacancy is collected again: the
+ * source's own date wins; otherwise the stored one stays, so a collector date
+ * remains the first time the vacancy was seen.
+ */
+function publication(fresh: RatedVacancy, stored?: SavedVacancy): Pick<SavedVacancy, "publishedAt" | "publishedAtSource"> {
+  if (fresh.publishedAt && fresh.publishedAtSource === "source") return { publishedAt: fresh.publishedAt, publishedAtSource: "source" };
+  if (stored?.publishedAt) return { publishedAt: stored.publishedAt, publishedAtSource: stored.publishedAtSource ?? "collector" };
+  return { publishedAt: fresh.fetchedAt, publishedAtSource: "collector" };
+}
+
 async function readStoredVacancies(): Promise<SavedVacancy[]> {
   try {
-    return JSON.parse(await readFile(statePath, "utf8")) as SavedVacancy[];
+    const vacancies = JSON.parse(await readFile(statePath, "utf8")) as SavedVacancy[];
+    // Records from before publication dates: the last collection is the best
+    // date left, and it is the collector's.
+    return vacancies.map((vacancy) => vacancy.publishedAt ? vacancy : { ...vacancy, ...publication(vacancy) });
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
@@ -93,14 +107,14 @@ export function mergeSourceVacancies(sourceId: string, incoming: RatedVacancy[])
     for (const vacancy of existing) {
       const fresh = incomingById.get(vacancy.id);
       if (fresh) {
-        merged.push({ ...fresh, id: vacancy.id, status: vacancy.status, decidedAt: vacancy.decidedAt });
+        merged.push({ ...fresh, ...publication(fresh, vacancy), id: vacancy.id, status: vacancy.status, decidedAt: vacancy.decidedAt });
         incomingById.delete(vacancy.id);
       } else if (vacancy.source !== sourceId || vacancy.status !== "new") {
         // Keep decisions for jobs that have disappeared temporarily from the source.
         merged.push(vacancy);
       }
     }
-    for (const [id, vacancy] of incomingById) merged.push({ ...vacancy, id, status: "new" });
+    for (const [id, vacancy] of incomingById) merged.push({ ...vacancy, ...publication(vacancy), id, status: "new" });
     await saveVacancies(merged);
     return { added: incomingById.size };
   });

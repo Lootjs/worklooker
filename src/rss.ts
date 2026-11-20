@@ -1,3 +1,4 @@
+import { sourcePublished } from "./dates.js";
 import { decodeEntities, fetchText, htmlToText } from "./structured-data.js";
 import type { Source, Vacancy } from "./types.js";
 
@@ -58,6 +59,7 @@ export async function scrapeRss(source: Source): Promise<Vacancy[]> {
       snippet: snippet.slice(0, 4_000),
       remoteByDefault: source.remoteByDefault,
       ...(isRemote(item) === undefined ? {} : { remote: isRemote(item) }),
+      ...sourcePublished(tagText(item, "pubDate")),
       fetchedAt: new Date().toISOString(),
     }];
   });

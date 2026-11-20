@@ -1,3 +1,4 @@
+import { sourcePublished } from "./dates.js";
 import { fetchText, htmlToText } from "./structured-data.js";
 import type { Source, Vacancy } from "./types.js";
 
@@ -14,6 +15,7 @@ interface ListedVacancy {
   work_type?: string | null;
   location?: { name?: string } | null;
   vacancy_url?: string;
+  created_at?: string;
 }
 
 interface VacancyDetails extends ListedVacancy {
@@ -60,6 +62,7 @@ export async function scrapePeopleForce(source: Source): Promise<Vacancy[]> {
       remoteByDefault: source.remoteByDefault,
       // PeopleForce names a remote vacancy's location "Remote"; an office name proves nothing.
       ...(/remote/i.test(item.location?.name ?? "") ? { remote: true } : {}),
+      ...sourcePublished(item.created_at),
       fetchedAt: new Date().toISOString(),
     });
   }

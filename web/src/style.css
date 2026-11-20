@@ -78,6 +78,8 @@ nav span { font-size: .75rem; margin-left: var(--space-1); font-variant-numeric:
 .card-stack { position: relative; width: min(880px, 100%); }
 .vacancy { width: 100%; display: grid; grid-template-rows: auto 1fr auto; gap: var(--space-8); padding: var(--space-12); cursor: pointer; background: var(--paper); color: var(--ink); border-radius: 16px; box-shadow: 0 32px 70px rgba(0,0,0,.3); animation: arrive .28s cubic-bezier(.2,.9,.2,1); }
 .vacancy-meta { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); }
+.meta-line { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); row-gap: var(--space-1); }
+.age { color: var(--ink-meta); font-size: var(--text-meta); }
 .source { color: var(--ink-meta); font-size: var(--text-meta); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .fit { flex: none; padding: var(--space-1) 10px; border-radius: 999px; font-size: var(--text-meta); font-weight: 700; white-space: nowrap; }
 .fit[data-tone="strong"] { color: var(--paper); background: var(--ink-accent); }
