@@ -3,7 +3,12 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
 type Status = "new" | "liked" | "rejected";
 type Vacancy = { id: string; title: string; author?: string; company?: string; sourceName: string; url: string; snippet: string; fetchedAt: string; publishedAt?: string; publishedAtSource?: "source" | "collector"; score: number; reasons: string[]; status: Status };
-type View = "new" | "liked";
+type View = "new" | "liked" | "sources";
+
+type DropReason = "excludedRole" | "notRemote" | "notTargetRole" | "russia" | "blocker" | "lowScore" | "stale";
+type DropGroup = { count: number; examples: Array<{ title: string; url: string; detail?: string }> };
+type SourceReport = { collectedAt: string; found: number; matched: number; added: number; error?: string; dropped: Partial<Record<DropReason, DropGroup>> };
+type SourceRow = { id: string; name: string; url: string; enabled: boolean; report?: SourceReport; queued: number; liked: number; rejected: number };
 
 const view = ref<View>("new");
 const vacancies = ref<Vacancy[]>([]);
@@ -144,6 +149,7 @@ function onLikedCardClick(event: MouseEvent, index: number): void {
 
 watch(view, async (next) => {
   expanded.value = false;
+  if (next === "sources") return void loadSources();
   if (next !== "liked") return;
   focusIndex.value = 0;
   await nextTick();
@@ -284,10 +290,83 @@ function ageLabel(vacancy: Vacancy): string | undefined {
   const days = Math.floor((Date.now() - new Date(vacancy.publishedAt).getTime()) / 86_400_000);
   if (days <= 0) return `${verb} сегодня`;
   if (days === 1) return `${verb} вчера`;
-  const lastTwo = days % 100;
-  const last = days % 10;
-  const unit = lastTwo >= 11 && lastTwo <= 14 ? "дней" : last === 1 ? "день" : last >= 2 && last <= 4 ? "дня" : "дней";
-  return `${verb} ${days} ${unit} назад`;
+  return `${verb} ${days} ${plural(days, "день", "дня", "дней")} назад`;
+}
+
+function plural(count: number, one: string, few: string, many: string): string {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  return lastTwo >= 11 && lastTwo <= 14 ? many : last === 1 ? one : last >= 2 && last <= 4 ? few : many;
+}
+
+/*
+ * Sources view: what each source's last collection found, what the profile
+ * filtered out and why, and how the user's decisions on it went.
+ */
+const sourceRows = ref<SourceRow[]>([]);
+const sourcesLoading = ref(false);
+const dropLabels: Record<DropReason, string> = {
+  notTargetRole: "не целевая роль",
+  notRemote: "не удалёнка",
+  russia: "РФ",
+  excludedRole: "исключённая роль",
+  blocker: "блокер",
+  stale: "старый пост",
+  lowScore: "низкая оценка",
+};
+/** Below this share of vacancies passing the profile, a source is mostly noise. */
+const lowPassRate = 0.02;
+
+function passRate(row: SourceRow): number | undefined {
+  return row.report && !row.report.error && row.report.found ? row.report.matched / row.report.found : undefined;
+}
+function percent(share: number): string {
+  return new Intl.NumberFormat("ru-RU", { style: "percent", maximumFractionDigits: share > 0 && share < 0.1 ? 1 : 0 }).format(share);
+}
+const sortedSources = computed(() => [...sourceRows.value].sort((a, b) =>
+  (passRate(b) ?? -1) - (passRate(a) ?? -1) || a.name.localeCompare(b.name)));
+function isLowRate(row: SourceRow): boolean {
+  const rate = passRate(row);
+  return row.enabled && rate !== undefined && rate < lowPassRate;
+}
+function sourceStatus(row: SourceRow): string {
+  if (!row.enabled) return "Выключен";
+  if (!row.report) return "Ещё не собирался";
+  const when = formatFetchedAt(row.report.collectedAt);
+  return row.report.error ? `Ошибка ${when}: ${row.report.error}` : `Собран ${when}`;
+}
+function decisionsText(row: SourceRow): string {
+  const decided = row.liked + row.rejected;
+  return decided ? `${row.liked} ${plural(row.liked, "лайк", "лайка", "лайков")} из ${decided}` : "пока нет";
+}
+function droppedGroups(row: SourceRow): Array<{ reason: DropReason; group: DropGroup }> {
+  return Object.entries(row.report?.dropped ?? {})
+    .map(([reason, group]) => ({ reason: reason as DropReason, group: group! }))
+    .sort((a, b) => b.group.count - a.group.count);
+}
+
+async function loadSources(): Promise<void> {
+  sourcesLoading.value = !sourceRows.value.length;
+  try {
+    const response = await fetch("/api/sources");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    sourceRows.value = await response.json() as SourceRow[];
+  } catch {
+    say("Не удалось загрузить источники: локальный API не отвечает.", "error", { label: "Повторить", run: () => void loadSources() });
+  } finally { sourcesLoading.value = false; }
+}
+
+async function toggleSource(row: SourceRow): Promise<void> {
+  const enabled = !row.enabled;
+  row.enabled = enabled;
+  try {
+    const response = await fetch(`/api/sources/${encodeURIComponent(row.id)}/enabled`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    say(enabled ? `${row.name} снова собирается.` : `${row.name} выключен: следующий сбор его пропустит.`);
+  } catch {
+    row.enabled = !enabled;
+    say(`Не удалось ${enabled ? "включить" : "выключить"} ${row.name}: локальный API не ответил.`, "error", { label: "Повторить", run: () => void toggleSource(row) });
+  }
 }
 
 type CollectionEvent =
@@ -304,6 +383,7 @@ function onCollectionEvent(event: CollectionEvent): void {
   }
   if (event.type === "done") {
     scheduleRefresh();
+    if (view.value === "sources") void loadSources();
     const summary = event.added ? `Добавлено новых вакансий: ${event.added}.` : "Новых вакансий нет.";
     const failures = describeFailures(event.errors);
     if (failures) say(`${summary} ${failures}`, "warning");
@@ -343,6 +423,8 @@ function onKey(event: KeyboardEvent): void {
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
   // Browser shortcuts (Alt+← is Back, Ctrl+L is the address bar) must never decide a vacancy.
   if (event.altKey || event.ctrlKey || event.metaKey) return;
+  // The sources view has no card to decide on.
+  if (view.value === "sources") return;
   const key = event.key.toLowerCase();
   if (view.value === "liked") {
     if (key === "arrowdown" || key === "j") { event.preventDefault(); focusLiked(focusIndex.value + 1); return; }
@@ -386,6 +468,7 @@ onUnmounted(() => {
       <nav aria-label="Разделы">
         <button :class="{ active: view === 'new' }" :aria-pressed="view === 'new'" @click="view = 'new'">Очередь <span>{{ queueCount }}</span></button>
         <button :class="{ active: view === 'liked' }" :aria-pressed="view === 'liked'" @click="view = 'liked'">Лайкнутые <span>{{ likedCount }}</span></button>
+        <button :class="{ active: view === 'sources' }" :aria-pressed="view === 'sources'" @click="view = 'sources'">Источники</button>
       </nav>
       <button class="collect" :disabled="collecting" @click="collect">{{ !collecting ? 'Обновить' : progress?.total ? `Сбор ${progress.done}/${progress.total}` : 'Сбор…' }}</button>
     </header>
@@ -432,6 +515,38 @@ onUnmounted(() => {
         <span class="feed-position" aria-live="polite">{{ focusIndex + 1 }} из {{ likedCards.length }}</span>
         <span><kbd>↑</kbd><kbd>↓</kbd> листать · <kbd>U</kbd> вернуть · <kbd>→</kbd> открыть</span>
       </div>
+    </section>
+
+    <section v-else-if="view === 'sources'" class="sources" aria-label="Источники">
+      <div v-if="sourcesLoading" class="state">Загружаем источники…</div>
+      <ol v-else class="source-sheet">
+        <li v-for="row in sortedSources" :key="row.id" class="source-row">
+          <header class="source-head">
+            <div class="source-title">
+              <h2><a :href="row.url" target="_blank" rel="noreferrer">{{ row.name }}</a></h2>
+              <p class="source-status" :data-tone="!row.enabled ? 'off' : row.report?.error ? 'error' : undefined">{{ sourceStatus(row) }}</p>
+            </div>
+            <span v-if="isLowRate(row)" class="low-rate">кандидат на выключение</span>
+            <button type="button" class="secondary" @click="toggleSource(row)">{{ row.enabled ? 'Выключить' : 'Включить' }}</button>
+          </header>
+          <dl v-if="row.report && !row.report.error" class="source-stats">
+            <div><dt>Прошло фильтр</dt><dd>{{ passRate(row) === undefined ? '—' : percent(passRate(row)!) }} <span>{{ row.report.matched }} из {{ row.report.found }}</span></dd></div>
+            <div><dt>Новых за сбор</dt><dd>{{ row.report.added }}</dd></div>
+            <div><dt>В очереди</dt><dd>{{ row.queued }}</dd></div>
+            <div><dt>Ваши решения</dt><dd>{{ decisionsText(row) }}</dd></div>
+          </dl>
+          <details v-for="{ reason, group } in droppedGroups(row)" :key="reason" class="drop-reason">
+            <summary>{{ dropLabels[reason] }} — {{ group.count }} <span>({{ percent(group.count / row.report!.found) }})</span></summary>
+            <ul>
+              <li v-for="example in group.examples" :key="example.url">
+                <a :href="example.url" target="_blank" rel="noreferrer">{{ example.title }}</a>
+                <span v-if="example.detail" class="drop-detail">«{{ example.detail }}»</span>
+              </li>
+            </ul>
+            <p v-if="group.count > group.examples.length" class="drop-more">и ещё {{ group.count - group.examples.length }}</p>
+          </details>
+        </li>
+      </ol>
     </section>
 
     <section v-else class="feed" @touchstart.passive="onTouchStart" @touchend.passive="onTouchEnd">

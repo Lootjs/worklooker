@@ -1,7 +1,7 @@
 import { chromium } from "playwright";
 import { readProfile } from "./local-config.js";
-import { createMatcher } from "./match.js";
-import { enabledSources, wantApplyBotSource } from "./sources.js";
+import { createRater } from "./match.js";
+import { enabledSources, isSourceEnabled, wantApplyBotSource } from "./sources.js";
 import { scrapeSource, withDetailDescriptions } from "./scrape.js";
 import { scrapeAshby } from "./ashby.js";
 import { scrapeGreenhouse } from "./greenhouse.js";
@@ -13,6 +13,7 @@ import { scrapeTribe } from "./tribe.js";
 import { mergeSourceVacancies, pruneRemovedSources } from "./store.js";
 import { scrapeWantApplyBot, wantApplyBotIsReady } from "./telegram.js";
 import { isStale } from "./dates.js";
+import { SourceTally, saveSourceReport } from "./source-reports.js";
 import type { RatedVacancy, Source, Vacancy } from "./types.js";
 
 export interface CollectionResult {
@@ -50,7 +51,7 @@ export async function collectVacancies(onEvent: (event: CollectionEvent) => void
   // Read per run, so profile edits apply without restarting the server.
   const { profile, isExample } = readProfile();
   if (isExample) console.warn("Профиль не настроен: используется worklooker.example.json. Создайте worklooker.local.json (см. README).");
-  const rateVacancy = createMatcher(profile);
+  const rateVacancy = createRater(profile);
   const browser = await chromium.launch({ headless: true });
   try {
     const tasks: Array<{ source: Source; collect: () => Promise<Vacancy[]> }> = enabledSources().map((source) => ({
@@ -63,7 +64,7 @@ export async function collectVacancies(onEvent: (event: CollectionEvent) => void
         : source.format === "ashby" ? scrapeAshby(source)
         : scrapeSource(source, browser),
     }));
-    if (await wantApplyBotIsReady()) tasks.push({ source: wantApplyBotSource, collect: scrapeWantApplyBot });
+    if (isSourceEnabled(wantApplyBotSource.id) && await wantApplyBotIsReady()) tasks.push({ source: wantApplyBotSource, collect: scrapeWantApplyBot });
     onEvent({ type: "start", total: tasks.length });
 
     const errors: string[] = [];
@@ -74,11 +75,18 @@ export async function collectVacancies(onEvent: (event: CollectionEvent) => void
       let matched: RatedVacancy[] = [];
       let error: string | undefined;
       let sourceAdded = 0;
+      // Every verdict is counted, so the sources view can explain what was filtered out.
+      const tally = new SourceTally();
       try {
-        const rate = (vacancies: Vacancy[]): RatedVacancy[] => vacancies
-          .filter((vacancy) => !(source.keepsClosedPosts && isStale(vacancy.publishedAt, profile.maxAgeDays)))
-          .map(rateVacancy)
-          .filter((vacancy): vacancy is RatedVacancy => vacancy !== undefined);
+        const rate = (vacancies: Vacancy[]): RatedVacancy[] => vacancies.flatMap((vacancy) => {
+          if (source.keepsClosedPosts && isStale(vacancy.publishedAt, profile.maxAgeDays)) {
+            tally.record(vacancy, { dropped: "stale" });
+            return [];
+          }
+          const verdict = rateVacancy(vacancy);
+          tally.record(vacancy, verdict);
+          return "vacancy" in verdict ? [verdict.vacancy] : [];
+        });
         if (source.format === "json-ld") {
           // Decides itself which vacancy pages to read before rating.
           matched = await collectJsonLd(source, rate);
@@ -93,6 +101,8 @@ export async function collectVacancies(onEvent: (event: CollectionEvent) => void
         error = errorMessage(reason);
         errors.push(`${source.name}: ${error}`);
       }
+      // A report that fails to save must not fail the collection.
+      await saveSourceReport(tally.report(source.id, matched.length, sourceAdded, error)).catch((reason) => console.warn(`Отчёт источника ${source.name} не сохранён: ${errorMessage(reason)}`));
       vacancies.push(...matched);
       added += sourceAdded;
       done += 1;

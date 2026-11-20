@@ -255,6 +255,10 @@ export function enabledSources(): Source[] {
   return sources.filter((source) => !disabled.has(source.id));
 }
 
+export function isSourceEnabled(id: string): boolean {
+  return !(readLocalConfig().disabledSources ?? []).includes(id);
+}
+
 /** A private chat with a bot needs a local MTProto user session, not web scraping. */
 export const wantApplyBotSource: Source = {
   id: "wantapply-bot",

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 /**
  * Who the vacancies are for. Phrases are case-insensitive; words may be
@@ -68,6 +68,19 @@ function readJson(path: string): LocalConfig | undefined {
 /** Read on every collection, so edits apply without restarting the server. */
 export function readLocalConfig(): LocalConfig {
   return readJson(localConfigPath) ?? {};
+}
+
+/**
+ * Turns a source on or off in `disabledSources`. Only that field changes; the
+ * rest of the file, including the profile, is written back as it was read.
+ */
+export function setSourceDisabled(id: string, disabled: boolean): string[] {
+  const config = readLocalConfig();
+  const others = (config.disabledSources ?? []).filter((item) => item !== id);
+  const disabledSources = disabled ? [...others, id] : others;
+  writeFileSync(localConfigPath, `${JSON.stringify({ ...config, disabledSources }, null, 2)}
+`);
+  return disabledSources;
 }
 
 function checkProfile(profile: MatchProfile, path: string): MatchProfile {

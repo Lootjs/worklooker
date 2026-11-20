@@ -2,6 +2,9 @@ import express from "express";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { collectVacancies } from "./collect.js";
+import { readLocalConfig, setSourceDisabled } from "./local-config.js";
+import { readSourceReports } from "./source-reports.js";
+import { sources, wantApplyBotSource } from "./sources.js";
 import { readVacancies, setVacancyStatus, type VacancyStatus } from "./store.js";
 
 const app = express();
@@ -18,6 +21,36 @@ app.post("/api/vacancies/:id/status", async (request, response) => {
   if (!(["new", "liked", "rejected"] as string[]).includes(status)) return response.status(400).json({ error: "Unknown status" });
   const vacancy = await setVacancyStatus(request.params.id, status);
   return vacancy ? response.json(vacancy) : response.status(404).json({ error: "Vacancy not found" });
+});
+
+const allSources = [...sources, wantApplyBotSource];
+
+/** Every configured source with its last collection report and the user's decisions on it. */
+app.get("/api/sources", async (_request, response) => {
+  const [reports, vacancies] = await Promise.all([readSourceReports(), readVacancies()]);
+  const disabled = new Set(readLocalConfig().disabledSources ?? []);
+  response.json(allSources.map((source) => {
+    const own = vacancies.filter((vacancy) => vacancy.source === source.id);
+    const count = (status: VacancyStatus) => own.filter((vacancy) => vacancy.status === status).length;
+    return {
+      id: source.id,
+      name: source.name,
+      url: source.url,
+      enabled: !disabled.has(source.id),
+      report: reports[source.id],
+      queued: count("new"),
+      liked: count("liked"),
+      rejected: count("rejected"),
+    };
+  }));
+});
+
+app.post("/api/sources/:id/enabled", (request, response) => {
+  const enabled = request.body?.enabled;
+  if (typeof enabled !== "boolean") return response.status(400).json({ error: "enabled must be true or false" });
+  if (!allSources.some((source) => source.id === request.params.id)) return response.status(404).json({ error: "Source not found" });
+  setSourceDisabled(request.params.id, !enabled);
+  return response.json({ id: request.params.id, enabled });
 });
 
 let collectionRunning = false;
