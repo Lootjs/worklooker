@@ -13,6 +13,7 @@
     "blockers": [],
     "excludeRussia": false,
     "excludeUSA": false,
+    "workCountries": [],
     "maxAgeDays": 30
   },
   "disabledSources": []

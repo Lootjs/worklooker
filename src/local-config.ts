@@ -39,6 +39,12 @@ export interface MatchProfile {
    */
   excludeUSA?: boolean;
   /**
+   * Countries you can work from, in English as job boards write them:
+   * `["Kazakhstan"]`. A vacancy whose source limits it to other countries is
+   * dropped; one open to anywhere is kept. Empty: no country check.
+   */
+  workCountries?: string[];
+  /**
    * Drop vacancies from feeds of posts (Telegram channels) published more than
    * this many days ago; 30 when absent. Career boards list only open vacancies
    * and are kept.
@@ -102,7 +108,7 @@ function checkProfile(profile: MatchProfile, path: string): MatchProfile {
     throw new Error(`${path}: profile.remoteOnly и profile.preferRussian должны быть true или false`);
   }
   if (typeof profile.minScore !== "number") throw new Error(`${path}: profile.minScore должен быть числом`);
-  for (const key of ["excludeRoles", "blockers"] as const) {
+  for (const key of ["excludeRoles", "blockers", "workCountries"] as const) {
     const list = profile[key];
     if (list !== undefined && (!Array.isArray(list) || list.some((item) => typeof item !== "string"))) {
       throw new Error(`${path}: profile.${key} должен быть списком строк`);

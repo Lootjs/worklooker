@@ -247,6 +247,38 @@ export const sources: Source[] = [
   telegramSource("remote-jobs", "Remote Jobs", "remotejobss", true),
   telegramSource("jobgeeks", "Top IT Jobs", "jobGeeks"),
   telegramSource("digital-club-jobs", "Digital Club Jobs", "digitalclubjobs"),
+  telegramSource("zarubezhom-jobs", "Работа за рубежом", "zarubezhom_jobs"),
+  telegramSource("geekjobs", "GeekJobs", "geekjobs"),
+  {
+    // One feed per category; regions such as "Anywhere in the World" come with each item.
+    id: "weworkremotely",
+    name: "We Work Remotely",
+    url: "https://weworkremotely.com/categories/remote-full-stack-programming-jobs.rss",
+    extraUrls: ["remote-front-end-programming-jobs", "remote-management-and-finance-jobs"].map((category) => `https://weworkremotely.com/categories/${category}.rss`),
+    format: "rss",
+    companyInTitle: true,
+    remoteByDefault: true,
+    vacancyPathPatterns: [/^\/remote-jobs\/[\w-]+$/],
+  },
+  {
+    // Searched by the profile's English target roles; each vacancy lists the countries it accepts.
+    id: "himalayas",
+    name: "Himalayas",
+    url: "https://himalayas.app/jobs",
+    format: "himalayas",
+    remoteByDefault: true,
+    vacancyPathPatterns: [/^\/companies\/[\w-]+\/jobs\/[\w-]+$/],
+  },
+  {
+    // Listings carry titles only; matching titles get their vacancy page read for the rest.
+    id: "hirehi",
+    name: "HireHi",
+    url: "https://hirehi.ru/vacancies/cto",
+    extraUrls: ["https://hirehi.ru/vacancies/frontend", "https://hirehi.ru/head-jobs", "https://hirehi.ru/lead-jobs", "https://hirehi.ru/remote-jobs"],
+    format: "json-ld",
+    remoteByDefault: false,
+    vacancyPathPatterns: [/^\/[a-z-]+\/[\w-]+-\d+$/],
+  },
 ];
 
 /** Sources to collect now: all configured ones minus those disabled locally. */

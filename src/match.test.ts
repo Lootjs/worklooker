@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { MatchProfile } from "./local-config.js";
-import { createRater, type MatchVerdict } from "./match.js";
+import { createRater, createTitleCheck, type MatchVerdict } from "./match.js";
 import type { Vacancy } from "./types.js";
 
 const profile: MatchProfile = {
@@ -112,6 +112,43 @@ describe("createRater", () => {
     it("is off unless the profile asks for it", () => {
       assert.ok("vacancy" in rate(vacancy("Tech Lead", "Applicants from: USA")));
     });
+  });
+
+  describe("Russian employers", () => {
+    it("drop by the company or the title", () => {
+      assert.deepEqual(rate(vacancy("Тимлид разработки взыскания", "", { company: "МТС Банк" })), { dropped: "russia", detail: "МТС Банк" });
+      assert.equal(dropped(rate(vacancy("Руководитель разработки ML", "", { company: "МАГНИТ, Розничная сеть" }))), "russia");
+      assert.equal(dropped(rate(vacancy("Тимлид frontend в Яндекс Маркет"))), "russia");
+    });
+
+    it("ignore a mention in the description", () => {
+      assert.ok("vacancy" in rate(vacancy("Tech Lead", "Опыт в Яндексе или Ozon будет плюсом", { company: "Acme" })));
+    });
+  });
+
+  describe("work countries", () => {
+    const rateKz = createRater({ ...profile, workCountries: ["Kazakhstan"] });
+    it("drops a vacancy limited to other countries", () => {
+      assert.deepEqual(rateKz(vacancy("Tech Lead", "", { allowedCountries: ["Canada", "United States"] })), { dropped: "country", detail: "Canada, United States" });
+    });
+    it("keeps one that lists the user's country, whatever its case", () => {
+      assert.ok("vacancy" in rateKz(vacancy("Tech Lead", "", { allowedCountries: ["Germany", "kazakhstan"] })));
+    });
+    it("keeps one open to anywhere", () => {
+      assert.ok("vacancy" in rateKz(vacancy("Tech Lead", "", { allowedCountries: [] })));
+    });
+    it("checks nothing without work countries", () => {
+      assert.ok("vacancy" in rate(vacancy("Tech Lead", "", { allowedCountries: ["Canada"] })));
+    });
+  });
+
+  it("title check passes roles and the field, not excluded roles", () => {
+    const check = createTitleCheck(profile);
+    assert.equal(check("Chief technology officer for e-commerce"), false);
+    assert.equal(check("Tech Lead, Payments"), true);
+    assert.equal(check("Senior Frontend Engineer"), true);
+    assert.equal(check("Junior Frontend Engineer"), false);
+    assert.equal(check("Руководитель по маркетингу"), false);
   });
 
   it("drops a blocker anywhere in the text", () => {

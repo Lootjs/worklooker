@@ -36,9 +36,10 @@ export interface Source {
    * - `peopleforce`: a PeopleForce career site's `.json` pages (see `src/peopleforce.ts`).
    * - `greenhouse`: `url` and `extraUrls` are Greenhouse Job Board API URLs (see `src/greenhouse.ts`).
    * - `ashby`: `url` is an Ashby job posting API URL (see `src/ashby.ts`).
+   * - `himalayas`: `url` and `extraUrls` are Himalayas search API URLs (see `src/himalayas.ts`).
    * All of them ignore `card` and `detailDescription`.
    */
-  format?: "json-ld" | "rss" | "tribe" | "tilda-feed" | "peopleforce" | "greenhouse" | "ashby";
+  format?: "json-ld" | "rss" | "tribe" | "tilda-feed" | "peopleforce" | "greenhouse" | "ashby" | "himalayas";
   /** The supplied URLs already select remote vacancies where the source supports it. */
   remoteByDefault: boolean;
   /**
@@ -47,6 +48,8 @@ export interface Source {
    * Career boards list only open vacancies and keep long-open ones.
    */
   keepsClosedPosts?: boolean;
+  /** RSS only: item titles read "Company: Role" (We Work Remotely). */
+  companyInTitle?: boolean;
   /** Paths which identify a vacancy detail link on this particular source. */
   vacancyPathPatterns: RegExp[];
 }
@@ -67,6 +70,11 @@ export interface Vacancy {
    * matcher looks for remote wording in the text.
    */
   remote?: boolean;
+  /**
+   * Countries applicants may work from, when the source lists them (in its
+   * own English names). Empty or absent: anywhere.
+   */
+  allowedCountries?: string[];
   /** When the last collection saw it. */
   fetchedAt: string;
   /**

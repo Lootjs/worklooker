@@ -27,6 +27,7 @@ const dropLabels: Record<SourceDropReason, string> = {
   notRemote: "не удалёнка",
   russia: "РФ",
   usa: "США",
+  country: "страна",
   excludedRole: "исключённая роль",
   blocker: "блокер",
   stale: "старый пост",

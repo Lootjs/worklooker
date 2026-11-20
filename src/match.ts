@@ -44,6 +44,21 @@ const russiaPattern = word([
 ].join("|"));
 // A Russian legal form. Case-sensitive, so an exclamation "Ооо!" is not one.
 const russianCompanyPattern = /(?<![\p{L}\p{N}_])ООО(?![\p{L}\p{N}_])/u;
+// Large Russian employers whose postings carry none of the signs above. Read
+// from the title and the company only: a description may well say "like at
+// Yandex". Extend the list as new ones turn up.
+const russianEmployerPattern = word([
+  String.raw`магнит[а-яё]*`,
+  String.raw`мтс(?:\s+банк)?|mts`,
+  String.raw`сбер[а-яё]*|sber[a-z]*`,
+  String.raw`яндекс[а-яё]*|yandex`,
+  String.raw`т-банк[а-яё]*|t-bank|тинькофф|tinkoff`,
+  String.raw`вконтакте|vk(?:\s+tech)?|вк`,
+  String.raw`ozon|озон[а-яё]*`,
+  String.raw`wildberries|вайлдберриз`,
+  String.raw`авито|avito`,
+  String.raw`лаборатори[а-яё]*\s+касперского|kaspersky`,
+].join("|"));
 
 // Signs that a vacancy needs someone working from the United States. Unlike
 // Russia, an American employer alone is not one: many hire worldwide. A bare
@@ -71,7 +86,27 @@ function textFor(vacancy: Vacancy): string {
 }
 
 /** Why a vacancy did not enter the queue; the first rule that failed. */
-export type DropReason = "excludedRole" | "notRemote" | "notTargetRole" | "russia" | "usa" | "blocker" | "lowScore";
+export type DropReason = "excludedRole" | "notRemote" | "notTargetRole" | "russia" | "usa" | "country" | "blocker" | "lowScore";
+
+/** Same country, whatever the case or extra spaces: "United  States" is "united states". */
+function countryKey(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Whether a title could pass the profile at all: it names a target role or
+ * the field, and no excluded role. Lets a collector skip opening vacancy
+ * pages whose listing gives only a title.
+ */
+export function createTitleCheck(profile: MatchProfile): (title: string) => boolean {
+  const rolePattern = anyOf(profile.roles);
+  const fieldPattern = anyOf(profile.field);
+  const excludedRolePattern = anyOf(profile.excludeRoles ?? []);
+  return (title) => {
+    const flat = title.replace(/\s+/g, " ");
+    return !excludedRolePattern.test(flat) && (rolePattern.test(flat) || fieldPattern.test(flat));
+  };
+}
 
 export type MatchVerdict =
   | { vacancy: RatedVacancy }
@@ -95,6 +130,7 @@ export function createRater(profile: MatchProfile): (vacancy: Vacancy) => MatchV
   const seniorPattern = anyOf(profile.seniority, false);
   const excludedRolePattern = anyOf(profile.excludeRoles ?? []);
   const blockerPattern = anyOf(profile.blockers ?? []);
+  const workCountries = new Set((profile.workCountries ?? []).map(countryKey));
   const skillPatterns = profile.skills.filter((skill) => skill.trim()).map((skill) => ({ skill, pattern: anyOf([skill]) }));
 
   return (vacancy) => {
@@ -129,8 +165,16 @@ export function createRater(profile: MatchProfile): (vacancy: Vacancy) => MatchV
     // also needs a target role or a senior role in the user's field.
     if (!hasTargetRole && !isSeniorInField) return { dropped: "notTargetRole" };
 
+    // A source's own list of countries applicants may work from: the user's
+    // country must be on it. An empty or absent list means anywhere.
+    const allowed = vacancy.allowedCountries ?? [];
+    if (workCountries.size && allowed.length && !allowed.some((country) => workCountries.has(countryKey(country)))) {
+      return { dropped: "country", detail: allowed.slice(0, 3).join(", ") + (allowed.length > 3 ? "…" : "") };
+    }
+
     if (profile.excludeRussia) {
-      const sign = text.match(russiaPattern) ?? text.match(russianCompanyPattern);
+      const sign = text.match(russiaPattern) ?? text.match(russianCompanyPattern)
+        ?? `${title} ${vacancy.company ?? ""}`.match(russianEmployerPattern);
       if (sign) return { dropped: "russia", detail: sign[0] };
     }
     if (profile.excludeUSA) {

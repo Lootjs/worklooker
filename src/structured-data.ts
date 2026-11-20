@@ -91,18 +91,24 @@ async function listVacancies(source: Source): Promise<{ vacancies: Vacancy[]; su
       if (item.name && item.url) add(new URL(item.url, pageUrl).href, item.name.trim(), tidyLines(item.description ?? ""));
     }
   }
-  return { vacancies, summaries: true };
+  // An ItemList of names alone (HireHi) says no more than links do.
+  return { vacancies, summaries: vacancies.some((vacancy) => vacancy.snippet) };
 }
 
 /**
  * Collects and rates a JSON-LD source. With listing summaries, only vacancies
  * that pass the profile get their JobPosting, and are rated again on it. A
- * listing of bare titles says too little to rate, so every vacancy gets its
- * JobPosting first.
+ * listing of bare titles says too little to rate, so every vacancy whose
+ * title `titleCheck` accepts gets its JobPosting first.
  */
-export async function collectJsonLd(source: Source, rate: (vacancies: Vacancy[]) => RatedVacancy[]): Promise<RatedVacancy[]> {
+export async function collectJsonLd(
+  source: Source,
+  rate: (vacancies: Vacancy[]) => RatedVacancy[],
+  titleCheck: (title: string) => boolean = () => true,
+): Promise<RatedVacancy[]> {
   const { vacancies, summaries } = await listVacancies(source);
-  return rate(await withJobPostings(summaries ? rate(vacancies) : vacancies));
+  // Titles alone cannot show the work format, so they only pick which pages to open.
+  return rate(await withJobPostings(summaries ? rate(vacancies) : vacancies.filter((vacancy) => titleCheck(vacancy.title))));
 }
 
 /** One line of working conditions: format, location, who may apply, salary. */

@@ -3,7 +3,8 @@ import { scrapeAshby } from "./ashby.js";
 import { isStale } from "./dates.js";
 import { scrapeGreenhouse } from "./greenhouse.js";
 import { readProfile } from "./local-config.js";
-import { createRater } from "./match.js";
+import { createRater, createTitleCheck } from "./match.js";
+import { scrapeHimalayas } from "./himalayas.js";
 import { scrapePeopleForce } from "./peopleforce.js";
 import { scrapeRss } from "./rss.js";
 import { scrapeSource, withDetailDescriptions } from "./scrape.js";
@@ -37,8 +38,14 @@ export type CollectionEvent =
   | { type: "error"; message: string };
 
 type Rate = (vacancies: Vacancy[]) => RatedVacancy[];
+/** What a collector may use: the shared browser, and the profile's title check and roles. */
+interface CollectorTools {
+  browser: Browser;
+  titleCheck: (title: string) => boolean;
+  roles: string[];
+}
 /** Reads one source and rates what it finds; returns the vacancies that passed. */
-type Collector = (source: Source, rate: Rate, browser: Browser) => Promise<RatedVacancy[]>;
+type Collector = (source: Source, rate: Rate, tools: CollectorTools) => Promise<RatedVacancy[]>;
 
 const readThenRate = (read: (source: Source) => Promise<Vacancy[]>): Collector => async (source, rate) => rate(await read(source));
 
@@ -50,9 +57,10 @@ const collectors: Record<NonNullable<Source["format"]> | "browser", Collector> =
   peopleforce: readThenRate(scrapePeopleForce),
   greenhouse: readThenRate(scrapeGreenhouse),
   ashby: readThenRate(scrapeAshby),
+  himalayas: async (source, rate, { roles }) => rate(await scrapeHimalayas(source, roles)),
   // Decides itself which vacancy pages to read before rating.
-  "json-ld": (source, rate) => collectJsonLd(source, rate),
-  browser: async (source, rate, browser) => {
+  "json-ld": (source, rate, { titleCheck }) => collectJsonLd(source, rate, titleCheck),
+  browser: async (source, rate, { browser }) => {
     const matched = rate(await scrapeSource(source, browser));
     // Listing cards may hold only metadata: fetch the full description for
     // the vacancies that passed, and rate them again on the complete text.
@@ -65,7 +73,7 @@ const collectors: Record<NonNullable<Source["format"]> | "browser", Collector> =
  * means no openings. A page or channel that shows nothing is more likely a
  * captcha, a login wall or a changed layout.
  */
-const trustedEmptyFormats = new Set<Source["format"]>(["rss", "tribe", "tilda-feed", "peopleforce", "greenhouse", "ashby"]);
+const trustedEmptyFormats = new Set<Source["format"]>(["rss", "tribe", "tilda-feed", "peopleforce", "greenhouse", "ashby", "himalayas"]);
 
 /** Sources read several pages each, so cap how many run at once. */
 const concurrency = 6;
@@ -92,6 +100,7 @@ export async function collectVacancies(onEvent: (event: CollectionEvent) => void
   const { profile, isExample } = readProfile();
   if (isExample) console.warn("Профиль не настроен: используется worklooker.example.json. Создайте worklooker.local.json (см. README).");
   const rateVacancy = createRater(profile);
+  const titleCheck = createTitleCheck(profile);
   const browser = await chromium.launch({ headless: true });
   try {
     const tasks: Array<{ source: Source; collect: Collector }> = enabledSources().map((source) => ({ source, collect: collectors[source.format ?? "browser"] }));
@@ -120,7 +129,7 @@ export async function collectVacancies(onEvent: (event: CollectionEvent) => void
         return "vacancy" in verdict ? [verdict.vacancy] : [];
       });
       try {
-        matched = await collect(source, rate, browser);
+        matched = await collect(source, rate, { browser, titleCheck, roles: profile.roles });
         // Merging an empty list would clear the source's queue; keep it and say why instead.
         if (!tally.found && source !== wantApplyBotSource && !trustedEmptyFormats.has(source.format)) {
           throw new Error("источник не отдал ни одной вакансии: возможно, капча, вход или изменилась вёрстка");
