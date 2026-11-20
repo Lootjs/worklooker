@@ -34,10 +34,13 @@ export interface MatchProfile {
   excludeRussia?: boolean;
   /**
    * Drop vacancies from feeds of posts (Telegram channels) published more than
-   * this many days ago. Career boards list only open vacancies and are kept.
+   * this many days ago; 30 when absent. Career boards list only open vacancies
+   * and are kept.
    */
   maxAgeDays?: number;
 }
+
+export const defaultMaxAgeDays = 30;
 
 /** Machine-specific settings, kept out of Git. */
 export interface LocalConfig {
@@ -78,8 +81,7 @@ export function setSourceDisabled(id: string, disabled: boolean): string[] {
   const config = readLocalConfig();
   const others = (config.disabledSources ?? []).filter((item) => item !== id);
   const disabledSources = disabled ? [...others, id] : others;
-  writeFileSync(localConfigPath, `${JSON.stringify({ ...config, disabledSources }, null, 2)}
-`);
+  writeFileSync(localConfigPath, `${JSON.stringify({ ...config, disabledSources }, null, 2)}\n`);
   return disabledSources;
 }
 
@@ -106,7 +108,7 @@ function checkProfile(profile: MatchProfile, path: string): MatchProfile {
   if (profile.excludeRussia !== undefined && typeof profile.excludeRussia !== "boolean") {
     throw new Error(`${path}: profile.excludeRussia должен быть true или false`);
   }
-  return profile;
+  return { ...profile, maxAgeDays: profile.maxAgeDays ?? defaultMaxAgeDays };
 }
 
 /** The local profile, or the example one while the user has not made their own. */

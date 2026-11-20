@@ -1,6 +1,8 @@
 import { sourcePublished } from "./dates.js";
-import { htmlToText } from "./structured-data.js";
+import { fetchText } from "./http.js";
+import { htmlToText } from "./text.js";
 import type { Source, Vacancy } from "./types.js";
+import { sourceVacancy } from "./vacancy.js";
 
 /**
  * Tribe (tribe.com.cy) renders its career page from its own public JSON API.
@@ -52,9 +54,7 @@ export async function scrapeTribe(source: Source): Promise<Vacancy[]> {
   for (let page = 1; page <= maxPages; page += 1) {
     const url = new URL(api);
     url.search = new URLSearchParams({ page: String(page), per_page: String(perPage), locale: "en" }).toString();
-    const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-    if (!response.ok) throw new Error(`сайт вернул HTTP ${response.status}`);
-    const { data, meta } = await response.json() as TribePage;
+    const { data, meta } = JSON.parse(await fetchText(url)) as TribePage;
     for (const vacancy of data) {
       if (!vacancy.position) continue;
       const sections: Array<[string, string | undefined]> = [["", vacancy.body], ["Requirements", vacancy.requirements], ["Conditions", vacancy.conditions]];
@@ -63,18 +63,14 @@ export async function scrapeTribe(source: Source): Promise<Vacancy[]> {
         .filter(Boolean)
         .join("\n\n");
       const formats = names(vacancy.work_formats);
-      vacancies.push({
-        source: source.id,
-        sourceName: source.name,
+      vacancies.push(sourceVacancy(source, {
         title: vacancy.position.trim(),
         url: new URL(`/jobs/${vacancy.id}`, source.url).href,
-        snippet: [conditions(vacancy), description].filter(Boolean).join("\n\n").slice(0, 4_000),
-        remoteByDefault: source.remoteByDefault,
+        snippet: [conditions(vacancy), description].filter(Boolean).join("\n\n"),
         // Several formats may be offered; remote among them is enough.
         ...(formats.length ? { remote: formats.some((format) => /remote/i.test(format)) } : {}),
         ...sourcePublished(vacancy.created_at_huntflow),
-        fetchedAt: new Date().toISOString(),
-      });
+      }));
     }
     if (!data.length || (meta?.current_page ?? page) >= (meta?.last_page ?? page)) break;
   }

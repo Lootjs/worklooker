@@ -259,6 +259,12 @@ export function isSourceEnabled(id: string): boolean {
   return !(readLocalConfig().disabledSources ?? []).includes(id);
 }
 
+/** A public Telegram channel, read from its web preview at t.me/s/<channel>. */
+export function isTelegramChannel(source: Source): boolean {
+  const url = new URL(source.url);
+  return url.hostname === "t.me" && url.pathname.startsWith("/s/");
+}
+
 /** A private chat with a bot needs a local MTProto user session, not web scraping. */
 export const wantApplyBotSource: Source = {
   id: "wantapply-bot",
@@ -268,3 +274,12 @@ export const wantApplyBotSource: Source = {
   keepsClosedPosts: true,
   vacancyPathPatterns: [],
 };
+
+/** Every source Worklooker knows, including the private bot chat. */
+export const allSources: Source[] = [...sources, wantApplyBotSource];
+
+/** Ids of known sources the user has not switched off; their undecided cards stay queued. */
+export function activeSourceIds(): Set<string> {
+  const disabled = new Set(readLocalConfig().disabledSources ?? []);
+  return new Set(allSources.filter((source) => !disabled.has(source.id)).map((source) => source.id));
+}

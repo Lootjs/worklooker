@@ -1,6 +1,8 @@
 import { sourcePublished } from "./dates.js";
-import { decodeEntities, fetchText, htmlToText } from "./structured-data.js";
+import { fetchText } from "./http.js";
+import { decodeEntities, htmlToText } from "./text.js";
 import type { Source, Vacancy } from "./types.js";
+import { isVacancyUrl, sourceVacancy } from "./vacancy.js";
 
 /**
  * RSS 2.0 job feeds. Teamtailor career sites add `remoteStatus` and
@@ -48,19 +50,15 @@ export async function scrapeRss(source: Source): Promise<Vacancy[]> {
     const link = tagText(item, "link");
     if (!title || !link || seen.has(link)) return [];
     const url = new URL(link, source.url);
-    if (!source.vacancyPathPatterns.some((pattern) => pattern.test(url.pathname))) return [];
+    if (!isVacancyUrl(source, url)) return [];
     seen.add(link);
     const snippet = [conditions(item), htmlToText(tagText(item, "description") ?? "")].filter(Boolean).join("\n\n");
-    return [{
-      source: source.id,
-      sourceName: source.name,
+    return [sourceVacancy(source, {
       title,
       url: url.href,
-      snippet: snippet.slice(0, 4_000),
-      remoteByDefault: source.remoteByDefault,
+      snippet,
       ...(isRemote(item) === undefined ? {} : { remote: isRemote(item) }),
       ...sourcePublished(tagText(item, "pubDate")),
-      fetchedAt: new Date().toISOString(),
-    }];
+    })];
   });
 }

@@ -7,8 +7,6 @@ export interface Source {
   url: string;
   /** Further listing pages or searches on the same source, collected after `url`. */
   extraUrls?: string[];
-  /** Telegram previews only: how many history pages (~20 posts each) to read. */
-  historyPages?: number;
   /** Wait for this selector when the listing is rendered after page load. */
   waitForSelector?: string;
   /** Structured listing cards; without it, every matching link is a candidate. */

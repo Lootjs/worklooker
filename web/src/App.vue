@@ -1,14 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import type { CollectionError, CollectionEvent, SavedVacancy as Vacancy, VacancyStatus as Status } from "../../src/api";
+import { ageLabel, formatDateTime } from "./format";
+import SourcesView from "./SourcesView.vue";
 
-type Status = "new" | "liked" | "rejected";
-type Vacancy = { id: string; title: string; author?: string; company?: string; sourceName: string; url: string; snippet: string; fetchedAt: string; publishedAt?: string; publishedAtSource?: "source" | "collector"; score: number; reasons: string[]; status: Status };
 type View = "new" | "liked" | "sources";
-
-type DropReason = "excludedRole" | "notRemote" | "notTargetRole" | "russia" | "blocker" | "lowScore" | "stale";
-type DropGroup = { count: number; examples: Array<{ title: string; url: string; detail?: string }> };
-type SourceReport = { collectedAt: string; found: number; matched: number; added: number; error?: string; dropped: Partial<Record<DropReason, DropGroup>> };
-type SourceRow = { id: string; name: string; url: string; enabled: boolean; report?: SourceReport; queued: number; liked: number; rejected: number };
 
 const view = ref<View>("new");
 const vacancies = ref<Vacancy[]>([]);
@@ -58,47 +54,13 @@ function fitLabel(score: number): string {
   return { strong: "сильное соответствие", good: "хорошее соответствие", review: "на просмотр" }[fitTone(score)];
 }
 
-// A capitalised first and last name, followed by a role. The name check must be
-// case-sensitive and the role check case-insensitive, so they are separate.
-const authorName = /^([А-ЯЁ][а-яё-]+\s+[А-ЯЁ][а-яё-]+)\s+/u;
-const roleStart = /^(?:head\s+of|frontend|front-end|tech(?:nical)?\s+lead|cto|senior|staff|principal|lead|middle|разработчик[а-яё]*|фронтенд[а-яё]*|техлид[а-яё]*|руководител[а-яё]*)(?![\p{L}\p{N}_])/iu;
-function authorOf(text: string): string | undefined {
-  const match = text.match(authorName);
-  return match && roleStart.test(text.slice(match[0].length)) ? match[1] : undefined;
-}
-const titleBoundary = /[📍💎🚀]|(?<![\p{L}\p{N}_])(?:remote|удал[её]н|опыт|experience|требован|команда|услови)/iu;
-function presentation(vacancy: Vacancy | undefined): { title: string; author?: string; snippet: string } | undefined {
-  if (!vacancy) return undefined;
-  const raw = vacancy.title.replace(/\s+/g, " ").replace(/^(?:#[\p{L}\d_]+\s*)+/u, "").replace(/^(?:→\s*)?(?:откликнуться\s+)?тут\s+/i, "").trim();
-    const author = vacancy.author ?? authorOf(raw);
-  const titleStart = author ? raw.slice(author.length).trim() : raw;
-  const boundary = titleStart.search(titleBoundary);
-  const title = titleStart.slice(0, boundary > 20 ? boundary : 120).trim() || raw;
-  const intro = [author, title].filter(Boolean).join(" ");
-  const withoutIntro = intro ? vacancy.snippet.replace(phrasePattern(intro), "") : vacancy.snippet;
-  const snippet = tidyLines(author ? withoutIntro.replace(phrasePattern(author), "") : withoutIntro);
-  return { title, ...(author ? { author } : {}), snippet };
-}
-
-/** Matches a phrase whatever whitespace, including line breaks, separates its words. */
-function phrasePattern(phrase: string): RegExp {
-  return new RegExp(phrase.trim().split(/\s+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(String.raw`\s+`), "g");
-}
-
-/** Keeps the description's line breaks, at most one blank line in a row. */
-function tidyLines(text: string): string {
-  return text.split("\n").map((line) => line.replace(/[^\S\n]+/g, " ").trim()).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-}
-const card = computed(() => presentation(current.value));
-
 // Liked jobs read as a scrolling feed: the card nearest the middle is in focus,
-// the others are blurred and drift away from it.
-const likedCards = computed(() => vacancies.value
-  .filter((vacancy) => vacancy.status === "liked")
-  .map((vacancy) => ({ vacancy, text: presentation(vacancy)! })));
+// the others are blurred and drift away from it. Titles, authors and
+// descriptions arrive ready from the collector; the page shows them as they are.
+const likedCards = computed(() => vacancies.value.filter((vacancy) => vacancy.status === "liked"));
 const feedEl = ref<HTMLElement>();
 const focusIndex = ref(0);
-const focusedLiked = computed(() => likedCards.value[focusIndex.value]?.vacancy);
+const focusedLiked = computed(() => likedCards.value[focusIndex.value]);
 const showFeed = computed(() => view.value === "liked" && !loading.value && likedCards.value.length > 0);
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
@@ -149,7 +111,7 @@ function onLikedCardClick(event: MouseEvent, index: number): void {
 
 watch(view, async (next) => {
   expanded.value = false;
-  if (next === "sources") return void loadSources();
+  if (next === "sources") return;
   if (next !== "liked") return;
   focusIndex.value = 0;
   await nextTick();
@@ -190,7 +152,7 @@ function withPendingReject(list: Vacancy[]): Vacancy[] {
 function reject(target: Vacancy | undefined = current.value): void {
   if (!target) return;
   flushPendingReject();
-  pendingReject.value = { vacancy: target, title: presentation(target)?.title ?? target.title, timer: window.setTimeout(() => flushPendingReject(), undoWindowMs) };
+  pendingReject.value = { vacancy: target, title: target.title, timer: window.setTimeout(() => flushPendingReject(), undoWindowMs) };
   vacancies.value = withLocalStatus(vacancies.value, target.id, "rejected");
   expanded.value = false;
 }
@@ -211,15 +173,14 @@ function flushPendingReject(keepalive = false): void {
   void setStatus("rejected", false, pending.vacancy, keepalive);
 }
 
-function describeFailures(errors: string[]): string {
+function describeFailures(errors: CollectionError[]): string {
   const blocked: string[] = [];
   const silent: string[] = [];
-  for (const error of errors) {
-    const separator = error.indexOf(": ");
-    const name = separator > 0 ? error.slice(0, separator) : error;
-    const reason = separator > 0 ? error.slice(separator + 2) : "";
-    // 4xx, closed previews and login walls will not fix themselves on retry.
-    (/HTTP 4\d\d|закрыл|captcha|авториз/i.test(reason) ? blocked : silent).push(name);
+  for (const { sourceName, message } of errors) {
+    // 4xx (except rate limits), closed previews, login walls and empty pages
+    // will not fix themselves on retry.
+    const isBlocked = /HTTP 4(?!29)dd|закрыл|captcha|капч|авториз|вход/i.test(message);
+    (isBlocked ? blocked : silent).push(sourceName);
   }
   return [
     blocked.length ? `Закрыты для сбора: ${blocked.join(", ")}.` : "",
@@ -265,7 +226,7 @@ async function setStatus(status: Status, open = false, target: Vacancy | undefin
     expanded.value = false;
   } catch {
     // Show the card in its saved state again, and offer to retry the exact decision.
-    const title = presentation(target)?.title ?? target.title;
+    const title = target.title;
     vacancies.value = withLocalStatus(vacancies.value, target.id, target.status);
     say(`Не удалось ${statusVerb[status]} «${title}»: локальный API не ответил.`, "error", { label: "Повторить", run: () => void setStatus(status, false, target) });
   }
@@ -279,101 +240,11 @@ function openInBackground(url: string): void {
   window.focus();
 }
 
-function formatFetchedAt(value: string): string {
-  return new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+/** Bumped after each collection, so the sources view reloads its reports. */
+const collectedVersion = ref(0);
+function onSourcesNotice({ text, tone = "info", retry }: { text: string; tone?: "info" | "error"; retry?: () => void }): void {
+  say(text, tone, retry ? { label: "Повторить", run: retry } : undefined);
 }
-
-/** "опубликована 3 дня назад" when the source dates it, "найдена …" when only we do. */
-function ageLabel(vacancy: Vacancy): string | undefined {
-  if (!vacancy.publishedAt) return undefined;
-  const verb = vacancy.publishedAtSource === "source" ? "опубликована" : "найдена";
-  const days = Math.floor((Date.now() - new Date(vacancy.publishedAt).getTime()) / 86_400_000);
-  if (days <= 0) return `${verb} сегодня`;
-  if (days === 1) return `${verb} вчера`;
-  return `${verb} ${days} ${plural(days, "день", "дня", "дней")} назад`;
-}
-
-function plural(count: number, one: string, few: string, many: string): string {
-  const lastTwo = count % 100;
-  const last = count % 10;
-  return lastTwo >= 11 && lastTwo <= 14 ? many : last === 1 ? one : last >= 2 && last <= 4 ? few : many;
-}
-
-/*
- * Sources view: what each source's last collection found, what the profile
- * filtered out and why, and how the user's decisions on it went.
- */
-const sourceRows = ref<SourceRow[]>([]);
-const sourcesLoading = ref(false);
-const dropLabels: Record<DropReason, string> = {
-  notTargetRole: "не целевая роль",
-  notRemote: "не удалёнка",
-  russia: "РФ",
-  excludedRole: "исключённая роль",
-  blocker: "блокер",
-  stale: "старый пост",
-  lowScore: "низкая оценка",
-};
-/** Below this share of vacancies passing the profile, a source is mostly noise. */
-const lowPassRate = 0.02;
-
-function passRate(row: SourceRow): number | undefined {
-  return row.report && !row.report.error && row.report.found ? row.report.matched / row.report.found : undefined;
-}
-function percent(share: number): string {
-  return new Intl.NumberFormat("ru-RU", { style: "percent", maximumFractionDigits: share > 0 && share < 0.1 ? 1 : 0 }).format(share);
-}
-const sortedSources = computed(() => [...sourceRows.value].sort((a, b) =>
-  (passRate(b) ?? -1) - (passRate(a) ?? -1) || a.name.localeCompare(b.name)));
-function isLowRate(row: SourceRow): boolean {
-  const rate = passRate(row);
-  return row.enabled && rate !== undefined && rate < lowPassRate;
-}
-function sourceStatus(row: SourceRow): string {
-  if (!row.enabled) return "Выключен";
-  if (!row.report) return "Ещё не собирался";
-  const when = formatFetchedAt(row.report.collectedAt);
-  return row.report.error ? `Ошибка ${when}: ${row.report.error}` : `Собран ${when}`;
-}
-function decisionsText(row: SourceRow): string {
-  const decided = row.liked + row.rejected;
-  return decided ? `${row.liked} ${plural(row.liked, "лайк", "лайка", "лайков")} из ${decided}` : "пока нет";
-}
-function droppedGroups(row: SourceRow): Array<{ reason: DropReason; group: DropGroup }> {
-  return Object.entries(row.report?.dropped ?? {})
-    .map(([reason, group]) => ({ reason: reason as DropReason, group: group! }))
-    .sort((a, b) => b.group.count - a.group.count);
-}
-
-async function loadSources(): Promise<void> {
-  sourcesLoading.value = !sourceRows.value.length;
-  try {
-    const response = await fetch("/api/sources");
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    sourceRows.value = await response.json() as SourceRow[];
-  } catch {
-    say("Не удалось загрузить источники: локальный API не отвечает.", "error", { label: "Повторить", run: () => void loadSources() });
-  } finally { sourcesLoading.value = false; }
-}
-
-async function toggleSource(row: SourceRow): Promise<void> {
-  const enabled = !row.enabled;
-  row.enabled = enabled;
-  try {
-    const response = await fetch(`/api/sources/${encodeURIComponent(row.id)}/enabled`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    say(enabled ? `${row.name} снова собирается.` : `${row.name} выключен: следующий сбор его пропустит.`);
-  } catch {
-    row.enabled = !enabled;
-    say(`Не удалось ${enabled ? "включить" : "выключить"} ${row.name}: локальный API не ответил.`, "error", { label: "Повторить", run: () => void toggleSource(row) });
-  }
-}
-
-type CollectionEvent =
-  | { type: "start"; total: number }
-  | { type: "source"; sourceName: string; done: number; total: number; added: number; error?: string }
-  | { type: "done"; added: number; errors: string[] }
-  | { type: "error"; message: string };
 
 function onCollectionEvent(event: CollectionEvent): void {
   if (event.type === "start") progress.value = { done: 0, total: event.total, added: 0 };
@@ -383,7 +254,7 @@ function onCollectionEvent(event: CollectionEvent): void {
   }
   if (event.type === "done") {
     scheduleRefresh();
-    if (view.value === "sources") void loadSources();
+    collectedVersion.value += 1;
     const summary = event.added ? `Добавлено новых вакансий: ${event.added}.` : "Новых вакансий нет.";
     const failures = describeFailures(event.errors);
     if (failures) say(`${summary} ${failures}`, "warning");
@@ -487,7 +358,7 @@ onUnmounted(() => {
 
     <section v-if="showFeed" ref="feedEl" class="liked-feed" aria-label="Лайкнутые вакансии" @scroll.passive="onFeedScroll">
       <article
-        v-for="({ vacancy, text }, index) in likedCards"
+        v-for="(vacancy, index) in likedCards"
         :key="vacancy.id"
         class="liked-card"
         :class="{ focused: index === focusIndex, before: index < focusIndex, after: index > focusIndex }"
@@ -500,11 +371,11 @@ onUnmounted(() => {
             <span class="meta-line"><span class="source">{{ vacancy.sourceName }}</span><span v-if="ageLabel(vacancy)" class="age">{{ ageLabel(vacancy) }}</span></span>
             <span class="fit" :data-tone="fitTone(vacancy.score)">{{ fitLabel(vacancy.score) }}</span>
           </header>
-          <p v-if="text.author" class="author">Разместил: {{ text.author }}</p>
-          <h2>{{ text.title }}</h2>
+          <p v-if="vacancy.author" class="author">Разместил: {{ vacancy.author }}</p>
+          <h2>{{ vacancy.title }}</h2>
           <p v-if="vacancy.company" class="company">{{ vacancy.company }}</p>
           <ul class="reasons" aria-label="Почему вакансия подошла"><li v-for="reason in vacancy.reasons" :key="reason">{{ reason }}</li></ul>
-          <p class="snippet">{{ text.snippet || 'Описание есть на странице вакансии.' }}</p>
+          <p class="snippet">{{ vacancy.snippet || 'Описание есть на странице вакансии.' }}</p>
           <footer class="liked-actions">
             <button type="button" class="secondary" :tabindex="index === focusIndex ? 0 : -1" @click="setStatus('new', false, vacancy)">Вернуть в очередь</button>
             <a class="like link-action" :href="vacancy.url" target="_blank" rel="noreferrer" :tabindex="index === focusIndex ? 0 : -1">Открыть вакансию</a>
@@ -517,37 +388,7 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <section v-else-if="view === 'sources'" class="sources" aria-label="Источники">
-      <div v-if="sourcesLoading" class="state">Загружаем источники…</div>
-      <ol v-else class="source-sheet">
-        <li v-for="row in sortedSources" :key="row.id" class="source-row">
-          <header class="source-head">
-            <div class="source-title">
-              <h2><a :href="row.url" target="_blank" rel="noreferrer">{{ row.name }}</a></h2>
-              <p class="source-status" :data-tone="!row.enabled ? 'off' : row.report?.error ? 'error' : undefined">{{ sourceStatus(row) }}</p>
-            </div>
-            <span v-if="isLowRate(row)" class="low-rate">кандидат на выключение</span>
-            <button type="button" class="secondary" @click="toggleSource(row)">{{ row.enabled ? 'Выключить' : 'Включить' }}</button>
-          </header>
-          <dl v-if="row.report && !row.report.error" class="source-stats">
-            <div><dt>Прошло фильтр</dt><dd>{{ passRate(row) === undefined ? '—' : percent(passRate(row)!) }} <span>{{ row.report.matched }} из {{ row.report.found }}</span></dd></div>
-            <div><dt>Новых за сбор</dt><dd>{{ row.report.added }}</dd></div>
-            <div><dt>В очереди</dt><dd>{{ row.queued }}</dd></div>
-            <div><dt>Ваши решения</dt><dd>{{ decisionsText(row) }}</dd></div>
-          </dl>
-          <details v-for="{ reason, group } in droppedGroups(row)" :key="reason" class="drop-reason">
-            <summary>{{ dropLabels[reason] }} — {{ group.count }} <span>({{ percent(group.count / row.report!.found) }})</span></summary>
-            <ul>
-              <li v-for="example in group.examples" :key="example.url">
-                <a :href="example.url" target="_blank" rel="noreferrer">{{ example.title }}</a>
-                <span v-if="example.detail" class="drop-detail">«{{ example.detail }}»</span>
-              </li>
-            </ul>
-            <p v-if="group.count > group.examples.length" class="drop-more">и ещё {{ group.count - group.examples.length }}</p>
-          </details>
-        </li>
-      </ol>
-    </section>
+    <SourcesView v-else-if="view === 'sources'" :collected-version="collectedVersion" @notice="onSourcesNotice" />
 
     <section v-else class="feed" @touchstart.passive="onTouchStart" @touchend.passive="onTouchEnd">
       <div v-if="loading" class="state">Загружаем вашу очередь…</div>
@@ -570,15 +411,15 @@ onUnmounted(() => {
             <span class="fit" :data-tone="fitTone(current.score)">{{ fitLabel(current.score) }}</span>
           </header>
           <div class="copy">
-            <p v-if="card?.author" class="author">Разместил: {{ card.author }}</p>
-            <h1>{{ card?.title }}</h1>
+            <p v-if="current.author" class="author">Разместил: {{ current.author }}</p>
+            <h1>{{ current.title }}</h1>
             <p v-if="current.company" class="company">{{ current.company }}</p>
             <ul class="reasons" aria-label="Почему вакансия в очереди"><li v-for="reason in current.reasons" :key="reason">{{ reason }}</li></ul>
-            <p class="snippet">{{ card?.snippet || 'Описание есть на странице вакансии.' }}</p>
+            <p class="snippet">{{ current.snippet || 'Описание есть на странице вакансии.' }}</p>
             <dl v-if="expanded" class="details">
               <div><dt>Источник</dt><dd>{{ current.sourceName }}</dd></div>
-              <div v-if="current.publishedAt"><dt>{{ current.publishedAtSource === 'source' ? 'Опубликована' : 'Найдена' }}</dt><dd>{{ formatFetchedAt(current.publishedAt) }}</dd></div>
-              <div><dt>Последний сбор</dt><dd>{{ formatFetchedAt(current.fetchedAt) }}</dd></div>
+              <div v-if="current.publishedAt"><dt>{{ current.publishedAtSource === 'source' ? 'Опубликована' : 'Найдена' }}</dt><dd>{{ formatDateTime(current.publishedAt) }}</dd></div>
+              <div><dt>Последний сбор</dt><dd>{{ formatDateTime(current.fetchedAt) }}</dd></div>
               <div><dt>Ссылка</dt><dd><a class="detail-link" :href="current.url" target="_blank" rel="noreferrer" @click.stop>{{ current.url }}</a></dd></div>
             </dl>
           </div>

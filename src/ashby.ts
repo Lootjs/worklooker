@@ -1,6 +1,8 @@
 import { sourcePublished } from "./dates.js";
-import { fetchText, htmlToText } from "./structured-data.js";
+import { fetchText } from "./http.js";
+import { htmlToText } from "./text.js";
 import type { Source, Vacancy } from "./types.js";
+import { isVacancyUrl, mergeByTitle, sourceVacancy } from "./vacancy.js";
 
 /**
  * Ashby's public job posting API: one request per company board returns every
@@ -46,41 +48,27 @@ function isRemote(job: AshbyJob): boolean {
 }
 
 export async function scrapeAshby(source: Source): Promise<Vacancy[]> {
-  const byTitle = new Map<string, { job: AshbyJob; locations: string[] }>();
+  const jobs: AshbyJob[] = [];
   for (const boardUrl of [source.url, ...(source.extraUrls ?? [])]) {
-    const { jobs } = JSON.parse(await fetchText(boardUrl)) as { jobs?: AshbyJob[] };
-    for (const job of jobs ?? []) {
-      const title = job.title?.trim();
-      if (!title || !job.jobUrl || job.isListed === false) continue;
-      const known = byTitle.get(title.toLowerCase());
-      if (!known) {
-        byTitle.set(title.toLowerCase(), { job, locations: locationsOf(job) });
-        continue;
-      }
-      for (const place of locationsOf(job)) if (!known.locations.includes(place)) known.locations.push(place);
-      // Keep the remote copy as the representative, so its format line is right.
-      if (isRemote(job) && !isRemote(known.job)) known.job = job;
-    }
+    jobs.push(...(JSON.parse(await fetchText(boardUrl)) as { jobs?: AshbyJob[] }).jobs ?? []);
   }
-  return [...byTitle.values()].flatMap(({ job, locations }) => {
+  const listed = jobs.filter((job) => job.jobUrl && job.isListed !== false);
+  // Keep the remote copy as the representative, so its format line is right.
+  return mergeByTitle(listed, (job) => job.title, locationsOf, (candidate, current) => isRemote(candidate) && !isRemote(current)).flatMap(({ job, locations }) => {
     const url = new URL(job.jobUrl!);
-    if (!source.vacancyPathPatterns.some((pattern) => pattern.test(url.pathname))) return [];
+    if (!isVacancyUrl(source, url)) return [];
     // "On-site" avoids the word "remote", which the profile matcher looks for.
     const format = isRemote(job) ? "Remote" : job.workplaceType === "Hybrid" ? "Hybrid" : job.workplaceType === "OnSite" ? "On-site" : undefined;
     const conditions = [format, locations.join("; "), job.compensation?.compensationTierSummary?.trim(), job.department?.trim()]
       .filter(Boolean)
       .join(" · ");
     const description = job.descriptionHtml ? htmlToText(job.descriptionHtml) : job.descriptionPlain?.trim() ?? "";
-    return [{
-      source: source.id,
-      sourceName: source.name,
+    return [sourceVacancy(source, {
       title: job.title!.trim(),
       url: url.href,
-      snippet: [conditions, description].filter(Boolean).join("\n\n").slice(0, 4_000),
-      remoteByDefault: source.remoteByDefault,
+      snippet: [conditions, description].filter(Boolean).join("\n\n"),
       ...(job.workplaceType ? { remote: isRemote(job) } : {}),
       ...sourcePublished(job.publishedAt),
-      fetchedAt: new Date().toISOString(),
-    }];
+    })];
   });
 }

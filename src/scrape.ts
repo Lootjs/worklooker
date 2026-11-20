@@ -1,6 +1,9 @@
 import { chromium, type Browser, type Page } from "playwright";
 import { sourcePublished } from "./dates.js";
+import { isTelegramChannel } from "./sources.js";
+import { digestPattern, phrasePattern, tidyLines } from "./text.js";
 import type { Source, Vacancy } from "./types.js";
+import { isVacancyUrl, maxSnippetLength, sourceVacancy } from "./vacancy.js";
 
 /** `date` is the post's own time, where the page shows it (Telegram previews). */
 type LinkCandidate = { href: string; text: string; title?: string; company?: string; date?: string };
@@ -16,8 +19,8 @@ function authorOf(text: string): string | undefined {
   return match && roleStart.test(text.slice(match[0].length)) ? match[1] : undefined;
 }
 const titleBoundary = /[📍💎🚀]|(?<![\p{L}\p{N}_])(?:remote|удал[её]н|опыт|experience|требован|команда|услови)/iu;
-const digestPattern = /(?:^|\s)#(?:дайджест|digest)(?=\s|$)|(?:^|\n)\s*(?:подборка\s+вакансий|дайджест\s+вакансий|вакансии\s+за)/im;
-const defaultHistoryPages = 5;
+/** Preview pages to read per channel, about 20 posts each. */
+const telegramHistoryPages = 5;
 const detailPauseMs = 1_000;
 const detailRetryBackoffMs = [4_000, 10_000];
 
@@ -30,32 +33,13 @@ function absoluteUrl(href: string, baseUrl: string): string | undefined {
   }
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/** Collapses spaces inside lines but keeps line breaks, at most one blank line in a row. */
-export function tidyLines(text: string): string {
-  return text
-    .replace(/\r/g, "")
-    .split("\n")
-    .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-/** Matches a phrase whatever whitespace, including line breaks, separates its words. */
-function phrasePattern(phrase: string, flags = ""): RegExp {
-  return new RegExp(phrase.trim().split(/\s+/).map(escapeRegExp).join(String.raw`\s+`), flags);
-}
-
-function formatVacancyText(text: string, sourceName: string): Pick<Vacancy, "title" | "author" | "snippet"> {
+/** Splits a free-text post into title, author and description. */
+export function formatVacancyText(text: string, sourceName: string): Pick<Vacancy, "title" | "author" | "snippet"> {
   const body = tidyLines(text)
     .replace(/^\d{1,2}:\d{2}\s+/, "")
     .replace(new RegExp(String.raw`^${phrasePattern(sourceName).source}\s+`, "i"), "")
     .replace(/^(?:#[\p{L}\d_]+\s*)+/u, "")
-    .replace(/^(?:→\s*)?(?:откликнуться\s+)?тут\s+/i, "")
+    .replace(/^(?:→\s*)?(?:откликнуться\s+)?тут(?![\p{L}\p{N}_])\s*/iu, "")
     .trim();
   // Title and author are found on one flattened line; the description keeps its lines.
   const raw = body.replace(/\s+/g, " ");
@@ -65,8 +49,9 @@ function formatVacancyText(text: string, sourceName: string): Pick<Vacancy, "tit
   const titleStart = author ? raw.slice(author.length).trim() : raw;
   const boundary = titleStart.search(titleBoundary);
   const title = titleStart.slice(0, boundary > 20 ? boundary : 120).trim();
+  // Only the opening copy goes: the title may come up again in the text.
   const snippet = tidyLines(body
-    .replace(title ? phrasePattern(title, "g") : /$^/, "")
+    .replace(title ? phrasePattern(title) : /$^/, "")
     .replace(author ? phrasePattern(author) : /$^/, ""));
   return { title: title || raw.slice(0, 120), ...(author ? { author } : {}), snippet: snippet.slice(0, 1_200) };
 }
@@ -98,7 +83,7 @@ function uniqueByUrl(candidates: LinkCandidate[], source: Source): Vacancy[] {
     const pathname = new URL(url).pathname;
     // Only preserve a known vacancy detail URL. In a Telegram post, this is
     // the permalink to the post itself — never one of its incidental links.
-    if (!source.vacancyPathPatterns.some((pattern) => pattern.test(pathname))) return [];
+    if (!isVacancyUrl(source, url)) return [];
     // Avoid menu and result-page links that happen to match broadly.
     if (pathname === new URL(source.url).pathname) return [];
     // Structured cards already name the title; only free text needs guessing.
@@ -106,18 +91,14 @@ function uniqueByUrl(candidates: LinkCandidate[], source: Source): Vacancy[] {
       ? { title: title.replace(/\s+/g, " ").trim(), snippet: cardDetails(text, [title, company]) }
       : formatVacancyText(text, source.name);
     seen.add(url);
-    return [{
-      source: source.id,
-      sourceName: source.name,
+    return [sourceVacancy(source, {
       title: formatted.title,
-      author: "author" in formatted ? formatted.author : undefined,
+      ...("author" in formatted && formatted.author ? { author: formatted.author } : {}),
       ...(company?.trim() ? { company: company.trim() } : {}),
       url,
       snippet: formatted.snippet,
-      remoteByDefault: source.remoteByDefault,
       ...sourcePublished(date),
-      fetchedAt: new Date().toISOString(),
-    }];
+    })];
   });
 }
 
@@ -132,7 +113,7 @@ async function open(page: Page, url: string): Promise<void> {
 async function scrapeTelegramPreview(page: Page, source: Source): Promise<LinkCandidate[]> {
   const messages: LinkCandidate[] = [];
   let url: string | undefined = source.url;
-  for (let pageIndex = 0; url && pageIndex < (source.historyPages ?? defaultHistoryPages); pageIndex += 1) {
+  for (let pageIndex = 0; url && pageIndex < telegramHistoryPages; pageIndex += 1) {
     await open(page, url);
     // Channels with the web preview disabled redirect from /s/handle to /handle.
     if (!new URL(page.url()).pathname.startsWith("/s/")) {
@@ -212,7 +193,7 @@ export async function withDetailDescriptions<T extends Vacancy>(source: Source, 
           // Keep the listing snippet if every attempt fails.
         }
       }
-      enriched.push(description ? { ...vacancy, snippet: [vacancy.snippet, description].filter(Boolean).join("\n\n").slice(0, 4_000) } : vacancy);
+      enriched.push(description ? { ...vacancy, snippet: [vacancy.snippet, description].filter(Boolean).join("\n\n").slice(0, maxSnippetLength) } : vacancy);
     }
     return enriched;
   } finally {
@@ -229,7 +210,7 @@ export async function scrapeSource(source: Source, sharedBrowser?: Browser): Pro
   const context = await browser.newContext({ viewport: { width: 1440, height: 1200 } });
   try {
     const page = await context.newPage();
-    if (new URL(source.url).hostname === "t.me") return uniqueByUrl(await scrapeTelegramPreview(page, source), source);
+    if (isTelegramChannel(source)) return uniqueByUrl(await scrapeTelegramPreview(page, source), source);
 
     const candidates: LinkCandidate[] = [];
     for (const url of [source.url, ...(source.extraUrls ?? [])]) candidates.push(...await scrapeListing(page, source, url));

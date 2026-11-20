@@ -1,6 +1,8 @@
 import { sourcePublished } from "./dates.js";
-import { fetchText, htmlToText } from "./structured-data.js";
+import { fetchText } from "./http.js";
+import { htmlToText } from "./text.js";
 import type { Source, Vacancy } from "./types.js";
+import { isVacancyUrl, sourceVacancy } from "./vacancy.js";
 
 /**
  * PeopleForce career sites answer `.json` next to their pages: `/careers.json`
@@ -44,7 +46,7 @@ export async function scrapePeopleForce(source: Source): Promise<Vacancy[]> {
   const vacancies: Vacancy[] = [];
   for (const [index, item] of listed.entries()) {
     const url = pageUrl(item, source);
-    if (!item.title || !source.vacancyPathPatterns.some((pattern) => pattern.test(url.pathname))) continue;
+    if (!item.title || !isVacancyUrl(source, url)) continue;
     if (index > 0) await new Promise((resolve) => setTimeout(resolve, detailPauseMs));
     let description = "";
     try {
@@ -53,18 +55,14 @@ export async function scrapePeopleForce(source: Source): Promise<Vacancy[]> {
     } catch {
       // Keep the vacancy with its title and conditions only.
     }
-    vacancies.push({
-      source: source.id,
-      sourceName: source.name,
+    vacancies.push(sourceVacancy(source, {
       title: item.title.trim(),
       url: url.href,
-      snippet: [conditions(item), description].filter(Boolean).join("\n\n").slice(0, 4_000),
-      remoteByDefault: source.remoteByDefault,
+      snippet: [conditions(item), description].filter(Boolean).join("\n\n"),
       // PeopleForce names a remote vacancy's location "Remote"; an office name proves nothing.
       ...(/remote/i.test(item.location?.name ?? "") ? { remote: true } : {}),
       ...sourcePublished(item.created_at),
-      fetchedAt: new Date().toISOString(),
-    });
+    }));
   }
   return vacancies;
 }

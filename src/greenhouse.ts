@@ -1,6 +1,8 @@
 import { sourcePublished } from "./dates.js";
-import { decodeEntities, fetchText, htmlToText } from "./structured-data.js";
+import { fetchText } from "./http.js";
+import { decodeEntities, htmlToText } from "./text.js";
 import type { Source, Vacancy } from "./types.js";
+import { isVacancyUrl, mergeByTitle, sourceVacancy } from "./vacancy.js";
 
 /**
  * Greenhouse's public Job Board API: one request per board returns every
@@ -34,41 +36,27 @@ function salary(job: GreenhouseJob): string | undefined {
 }
 
 export async function scrapeGreenhouse(source: Source): Promise<Vacancy[]> {
-  const byTitle = new Map<string, { job: GreenhouseJob; locations: string[] }>();
+  const jobs: GreenhouseJob[] = [];
   for (const boardUrl of [source.url, ...(source.extraUrls ?? [])]) {
-    const { jobs } = JSON.parse(await fetchText(boardUrl)) as { jobs?: GreenhouseJob[] };
-    for (const job of jobs ?? []) {
-      const title = job.title?.trim();
-      if (!title || !job.absolute_url) continue;
-      const location = job.location?.name?.trim();
-      const known = byTitle.get(title.toLowerCase());
-      if (known) {
-        if (location && !known.locations.includes(location)) known.locations.push(location);
-      } else {
-        byTitle.set(title.toLowerCase(), { job, locations: location ? [location] : [] });
-      }
-    }
+    jobs.push(...(JSON.parse(await fetchText(boardUrl)) as { jobs?: GreenhouseJob[] }).jobs ?? []);
   }
-  return [...byTitle.values()].flatMap(({ job, locations }) => {
+  const listed = jobs.filter((job) => job.absolute_url);
+  return mergeByTitle(listed, (job) => job.title, (job) => job.location?.name?.trim() ? [job.location.name.trim()] : []).flatMap(({ job, locations }) => {
     const url = new URL(job.absolute_url!);
-    if (!source.vacancyPathPatterns.some((pattern) => pattern.test(url.pathname))) return [];
+    if (!isVacancyUrl(source, url)) return [];
     const conditions = [locations.join("; "), salary(job), job.departments?.map((department) => department.name).filter(Boolean).join(", ")]
       .filter(Boolean)
       .join(" · ");
     // The API escapes the description HTML once more.
     const description = htmlToText(decodeEntities(job.content ?? ""));
-    return [{
-      source: source.id,
-      sourceName: source.name,
+    return [sourceVacancy(source, {
       title: job.title!.trim(),
       url: url.href,
-      snippet: [conditions, description].filter(Boolean).join("\n\n").slice(0, 4_000),
-      remoteByDefault: source.remoteByDefault,
+      snippet: [conditions, description].filter(Boolean).join("\n\n"),
       // Greenhouse has no work-format field; a location named "… - Remote" is
       // the only structured signal, and its absence proves nothing.
       ...(locations.some((place) => /remote/i.test(place)) ? { remote: true } : {}),
       ...sourcePublished(job.first_published),
-      fetchedAt: new Date().toISOString(),
-    }];
+    })];
   });
 }

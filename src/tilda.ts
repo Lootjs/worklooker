@@ -1,4 +1,6 @@
-import { decodeEntities, fetchText, htmlToText } from "./structured-data.js";
+import { fetchText } from "./http.js";
+import { decodeEntities, htmlToText } from "./text.js";
+import { isVacancyUrl, sourceVacancy } from "./vacancy.js";
 import type { Source, Vacancy } from "./types.js";
 
 /**
@@ -61,20 +63,16 @@ export async function scrapeTildaFeed(source: Source): Promise<Vacancy[]> {
     const link = fields.link?.url ?? fields.url?.url;
     if (!title || !link || seen.has(link)) return [];
     const url = new URL(link);
-    if (!source.vacancyPathPatterns.some((pattern) => pattern.test(url.pathname))) return [];
+    if (!isVacancyUrl(source, url)) return [];
     seen.add(link);
     const formats = [fields.format ?? []].flat().map(plain).filter(Boolean);
     const snippet = [conditions(fields), htmlToText(fields.role ?? ""), htmlToText(fields.description ?? "")].filter(Boolean).join("\n\n");
-    return [{
-      source: source.id,
-      sourceName: source.name,
+    return [sourceVacancy(source, {
       title,
       url: url.href,
-      snippet: snippet.slice(0, 4_000),
-      remoteByDefault: source.remoteByDefault,
+      snippet,
       // Formats list what is offered, e.g. "Remote / Relocation".
       ...(formats.length ? { remote: formats.some((format) => /remote/i.test(format)) } : {}),
-      fetchedAt: new Date().toISOString(),
-    }];
+    })];
   });
 }

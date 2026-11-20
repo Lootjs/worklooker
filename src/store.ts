@@ -1,6 +1,8 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { sources, wantApplyBotSource } from "./sources.js";
+import { writeFile, readFile } from "node:fs/promises";
+import { isStale } from "./dates.js";
+import { dataPath, serializedWith } from "./data-files.js";
+import { allSources, isTelegramChannel } from "./sources.js";
+import { digestPattern } from "./text.js";
 import type { RatedVacancy } from "./types.js";
 
 export type VacancyStatus = "new" | "liked" | "rejected";
@@ -11,19 +13,40 @@ export interface SavedVacancy extends RatedVacancy {
   decidedAt?: string;
 }
 
-const dataDirectory = "data";
-const statePath = join(dataDirectory, "vacancies.json");
-const rejectedPath = join(dataDirectory, "rejected.json");
-const telegramSourceIds = new Set(sources.filter((source) => new URL(source.url).hostname === "t.me").map((source) => source.id));
-const digestPattern = /(?:^|\s)#(?:дайджест|digest)(?=\s|$)|(?:^|\n)\s*(?:подборка\s+вакансий|дайджест\s+вакансий|вакансии\s+за)/im;
+const statePath = dataPath("vacancies.json");
+const rejectedPath = dataPath("rejected.json");
+const telegramChannelIds = new Set(allSources.filter(isTelegramChannel).map((source) => source.id));
+const feedSourceIds = new Set(allSources.filter((source) => source.keepsClosedPosts).map((source) => source.id));
 
 function normalize(value: string): string {
-  return value.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, " ").trim();
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
+// Legal forms say nothing about which company it is: "Acme Inc." is "Acme".
+const legalForms = new Set(["inc", "incorporated", "ltd", "limited", "llc", "gmbh", "corp", "corporation", "plc", "ооо", "оао", "зао", "пао", "ао", "тоо"]);
+function normalizeCompany(value: string): string {
+  return normalize(value).split(" ").filter((word) => !legalForms.has(word)).join(" ");
+}
+
+/**
+ * A vacancy's identity: its normalized role and company. Without a company,
+ * the source stands in for it, so unrelated posts with the same role in two
+ * channels stay apart.
+ */
 export function vacancyId(vacancy: Pick<RatedVacancy, "title" | "company" | "source">): string {
-  // Company is preferred when a source provides it; source is a stable fallback.
-  return Buffer.from(`${normalize(vacancy.title)}|${normalize(vacancy.company ?? vacancy.source)}`).toString("base64url");
+  const owner = vacancy.company ? normalizeCompany(vacancy.company) : "";
+  return Buffer.from(`${normalize(vacancy.title)}|${owner || normalize(vacancy.source)}`).toString("base64url");
+}
+
+/**
+ * A role without a company, long enough to be specific: the same post copied
+ * into another channel. Short titles ("Frontend Developer") are too common to
+ * treat as one vacancy.
+ */
+function crossPostKey(vacancy: Pick<RatedVacancy, "title" | "company">): string | undefined {
+  if (vacancy.company) return undefined;
+  const title = normalize(vacancy.title);
+  return title.length >= 30 ? title : undefined;
 }
 
 /**
@@ -37,53 +60,70 @@ function publication(fresh: RatedVacancy, stored?: SavedVacancy): Pick<SavedVaca
   return { publishedAt: fresh.fetchedAt, publishedAtSource: "collector" };
 }
 
+// A like wins: a duplicate is often rejected only to clear it from the queue
+// after its other copy was saved, and losing a saved job costs more than
+// seeing one twice.
+const statusWeight: Record<VacancyStatus, number> = { new: 0, rejected: 1, liked: 2 };
+
+/**
+ * Brings records written by earlier versions up to date: dates them, and
+ * recomputes identities. Two records that turn out to be one vacancy keep the
+ * user's decision (a like over a rejection over nothing).
+ */
+function upgraded(vacancies: SavedVacancy[]): SavedVacancy[] {
+  const byId = new Map<string, SavedVacancy>();
+  for (const stored of vacancies) {
+    const vacancy = { ...stored, ...(stored.publishedAt ? {} : publication(stored)), id: vacancyId(stored) };
+    const known = byId.get(vacancy.id);
+    if (!known || statusWeight[vacancy.status] > statusWeight[known.status]) byId.set(vacancy.id, vacancy);
+  }
+  return [...byId.values()];
+}
+
 async function readStoredVacancies(): Promise<SavedVacancy[]> {
   try {
-    const vacancies = JSON.parse(await readFile(statePath, "utf8")) as SavedVacancy[];
-    // Records from before publication dates: the last collection is the best
-    // date left, and it is the collector's.
-    return vacancies.map((vacancy) => vacancy.publishedAt ? vacancy : { ...vacancy, ...publication(vacancy) });
+    return upgraded(JSON.parse(await readFile(statePath, "utf8")) as SavedVacancy[]);
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
 }
 
-export async function saveVacancies(vacancies: SavedVacancy[]): Promise<void> {
-  await mkdir(dataDirectory, { recursive: true });
+async function saveVacancies(vacancies: SavedVacancy[]): Promise<void> {
   await writeFile(statePath, JSON.stringify(vacancies, null, 2));
   await writeFile(rejectedPath, JSON.stringify(vacancies.filter((vacancy) => vacancy.status === "rejected"), null, 2));
 }
 
-const knownSourceIds = new Set([...sources, wantApplyBotSource].map((source) => source.id));
+const serialized = serializedWith("vacancies");
 
-// Every write is a read-modify-write of the whole file. Collection now saves
-// each source as it finishes, while the user keeps deciding on cards, so all
-// mutations go through one queue to avoid losing each other's changes.
-let writeQueue: Promise<unknown> = Promise.resolve();
-function serialized<T>(task: () => Promise<T>): Promise<T> {
-  const run = writeQueue.then(task, task);
-  writeQueue = run.catch(() => undefined);
-  return run;
-}
-
-function withoutNoise(vacancies: SavedVacancy[]): SavedVacancy[] {
-  return vacancies.filter((vacancy) => {
-    const isDigest = digestPattern.test(`${vacancy.title}\n${vacancy.snippet}`);
-    let isLegacyTelegramOutboundLink = false;
-    // Previous collector versions saved arbitrary outbound links embedded in
-    // Telegram posts. New records use a permalink to the post itself.
-    try { isLegacyTelegramOutboundLink = telegramSourceIds.has(vacancy.source) && new URL(vacancy.url).hostname !== "t.me"; }
-    catch { isLegacyTelegramOutboundLink = true; }
-    // Rejected entries remain in the archive, but noisy current and liked
-    // records are removed from the working queue.
-    return vacancy.status === "rejected" || (!isDigest && !isLegacyTelegramOutboundLink);
-  });
+/**
+ * Undecided records that should not be in the queue: digests, which bundle
+ * several jobs, and Telegram records from earlier versions that saved a
+ * post's outbound link instead of the post. Liked and rejected records are
+ * the user's decisions and always stay.
+ */
+function isNoise(vacancy: SavedVacancy): boolean {
+  if (vacancy.status !== "new") return false;
+  if (digestPattern.test(`${vacancy.title}\n${vacancy.snippet}`)) return true;
+  try {
+    return telegramChannelIds.has(vacancy.source) && new URL(vacancy.url).hostname !== "t.me";
+  } catch {
+    return true;
+  }
 }
 
 /** Queued behind pending writes, so a reader never sees a half-written file. */
 export function readVacancies(): Promise<SavedVacancy[]> {
   return serialized(readStoredVacancies);
+}
+
+/**
+ * A queued post from a feed that keeps closed vacancies, older than the
+ * profile allows. Collection drops such posts when the source dates them; this
+ * also covers posts dated by when Worklooker first saw them.
+ */
+export function isExpiredPost(vacancy: SavedVacancy, maxAgeDays: number | undefined, now = new Date()): boolean {
+  return vacancy.status === "new" && feedSourceIds.has(vacancy.source) && isStale(vacancy.publishedAt, maxAgeDays, now);
 }
 
 export interface SourceMergeResult {
@@ -95,11 +135,12 @@ export interface SourceMergeResult {
  * Replaces one source's undecided vacancies with its latest results. Other
  * sources are untouched, so a failed source keeps its earlier queue. Existing
  * records keep their position and new ones are appended, so the card the user
- * is looking at does not jump while collection is still running.
+ * is looking at does not jump while collection is still running. A post
+ * already stored from another channel is not added again.
  */
 export function mergeSourceVacancies(sourceId: string, incoming: RatedVacancy[]): Promise<SourceMergeResult> {
   return serialized(async () => {
-    const existing = withoutNoise(await readStoredVacancies());
+    const existing = (await readStoredVacancies()).filter((vacancy) => !isNoise(vacancy));
     const incomingById = new Map<string, RatedVacancy>();
     for (const vacancy of incoming) if (!incomingById.has(vacancyId(vacancy))) incomingById.set(vacancyId(vacancy), vacancy);
 
@@ -114,18 +155,25 @@ export function mergeSourceVacancies(sourceId: string, incoming: RatedVacancy[])
         merged.push(vacancy);
       }
     }
-    for (const [id, vacancy] of incomingById) merged.push({ ...vacancy, ...publication(vacancy), id, status: "new" });
+    const crossPosts = new Set(existing.filter((vacancy) => vacancy.source !== sourceId).map(crossPostKey).filter(Boolean));
+    let added = 0;
+    for (const [id, vacancy] of incomingById) {
+      const key = crossPostKey(vacancy);
+      if (key && crossPosts.has(key)) continue;
+      merged.push({ ...vacancy, ...publication(vacancy), id, status: "new" });
+      added += 1;
+    }
     await saveVacancies(merged);
-    return { added: incomingById.size };
+    return { added };
   });
 }
 
-/** Drops undecided vacancies from sources that are no longer configured. */
-export function pruneRemovedSources(): Promise<void> {
+/** Drops undecided vacancies from sources that are gone or switched off. */
+export function pruneInactiveSources(activeSourceIds: Set<string>): Promise<void> {
   return serialized(async () => {
     const vacancies = await readStoredVacancies();
-    const kept = vacancies.filter((vacancy) => vacancy.status !== "new" || knownSourceIds.has(vacancy.source));
-    if (kept.length !== vacancies.length) await saveVacancies(kept);
+    const kept = vacancies.filter((vacancy) => vacancy.status !== "new" || activeSourceIds.has(vacancy.source));
+    await saveVacancies(kept);
   });
 }
 

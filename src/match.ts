@@ -1,16 +1,9 @@
 import type { MatchProfile } from "./local-config.js";
+import { escapeRegExp, wordEnd, wordStart } from "./text.js";
 import type { RatedVacancy, Vacancy } from "./types.js";
 
-// JavaScript's `\b` only understands ASCII word characters, so it never matches
-// around Cyrillic words. These Unicode-aware boundaries work for both scripts.
-const start = String.raw`(?<![\p{L}\p{N}_])`;
-const end = String.raw`(?![\p{L}\p{N}_])`;
 const never = /(?!)/;
-const word = (body: string, closed = true): RegExp => new RegExp(`${start}(?:${body})${closed ? end : ""}`, "iu");
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+const word = (body: string, closed = true): RegExp => new RegExp(`${wordStart}(?:${body})${closed ? wordEnd : ""}`, "iu");
 
 /** "руководител* frontend" → any whitespace between words, `*` continues a word. */
 function phraseSource(phrase: string): string {

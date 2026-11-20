@@ -1,6 +1,8 @@
 import { sourcePublished } from "./dates.js";
-import { tidyLines } from "./scrape.js";
+import { fetchText, HttpError } from "./http.js";
+import { decodeEntities, htmlToText, tidyLines } from "./text.js";
 import type { RatedVacancy, Source, Vacancy } from "./types.js";
+import { isVacancyUrl, maxSnippetLength, sourceVacancy } from "./vacancy.js";
 
 /**
  * Sources that publish schema.org JSON-LD in their server-rendered HTML: a
@@ -37,18 +39,6 @@ const detailPauseMs = 500;
 // Some sites escape `+` in the type attribute as `&#x2B;`.
 const jsonLdScript = /<script[^>]*type=["']application\/ld(?:\+|&#x2B;|&#43;)json["'][^>]*>([\s\S]*?)<\/script>/gi;
 
-class HttpError extends Error {
-  constructor(readonly status: number) {
-    super(status === 429 ? "сайт ограничил частоту запросов (HTTP 429), попробуйте позже" : `сайт вернул HTTP ${status}`);
-  }
-}
-
-export async function fetchText(url: string, timeoutMs = 30_000): Promise<string> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-  if (!response.ok) throw new HttpError(response.status);
-  return response.text();
-}
-
 /** Every JSON-LD node on the page, with `@graph` containers flattened. */
 function jsonLdNodes(html: string): JsonLdNode[] {
   return [...html.matchAll(jsonLdScript)].flatMap(([, body]) => {
@@ -65,33 +55,11 @@ function nodeOfType<T>(nodes: JsonLdNode[], type: string): T | undefined {
   return nodes.find((node) => [node["@type"]].flat().includes(type)) as T | undefined;
 }
 
-const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " " };
-
-/** Decodes named and numeric character references. */
-export function decodeEntities(text: string): string {
-  return text.replace(/&(#x[\da-f]+|#\d+|\w+);/gi, (match, code: string) => {
-    if (code[0] !== "#") return entities[code.toLowerCase()] ?? match;
-    const point = code[1].toLowerCase() === "x" ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
-    return Number.isFinite(point) ? String.fromCodePoint(point) : match;
-  });
-}
-
-/** Vacancy descriptions are HTML: keep paragraphs and list items as lines. */
-export function htmlToText(html: string): string {
-  return tidyLines(decodeEntities(html
-    // Each item starts its own line, so its closing tag, or a paragraph that
-    // ends it, must not add another one.
-    .replace(/(?:<\/p>\s*)?<\/li>/gi, "")
-    .replace(/<li[^>]*>/gi, "\n• ")
-    .replace(/<(?:br|\/p|\/ul|\/ol|\/h\d|\/div)[^>]*>/gi, "\n")
-    .replace(/<[^>]+>/g, "")));
-}
-
 /** Vacancy links on a listing page without an `ItemList`: titles only. */
 function linkedVacancies(html: string, pageUrl: string, source: Source): Array<{ url: string; title: string }> {
   return [...html.matchAll(/<a\s[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)].flatMap(([, href, inner]) => {
     const url = new URL(decodeEntities(href), pageUrl);
-    return source.vacancyPathPatterns.some((pattern) => pattern.test(url.pathname))
+    return isVacancyUrl(source, url)
       ? [{ url: url.href, title: decodeEntities(inner.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim() }]
       : [];
   });
@@ -107,9 +75,9 @@ async function listVacancies(source: Source): Promise<{ vacancies: Vacancy[]; su
   const seen = new Set<string>();
   const vacancies: Vacancy[] = [];
   const add = (url: string, title: string, snippet: string) => {
-    if (!title || seen.has(url) || !source.vacancyPathPatterns.some((pattern) => pattern.test(new URL(url).pathname))) return;
+    if (!title || seen.has(url) || !isVacancyUrl(source, url)) return;
     seen.add(url);
-    vacancies.push({ source: source.id, sourceName: source.name, title, url, snippet, remoteByDefault: source.remoteByDefault, fetchedAt: new Date().toISOString() });
+    vacancies.push(sourceVacancy(source, { title, url, snippet }));
   };
   for (const [index, pageUrl] of [source.url, ...(source.extraUrls ?? [])].entries()) {
     const html = await fetchText(pageUrl);
@@ -172,7 +140,7 @@ export async function withJobPostings<T extends Vacancy>(vacancies: T[]): Promis
       const snippet = [conditions(posting), htmlToText(posting.description ?? "")].filter(Boolean).join("\n\n");
       // Only TELECOMMUTE is explicit; sites often omit the field for office jobs.
       const remote = posting.jobLocationType === "TELECOMMUTE" ? { remote: true } : {};
-      enriched[index] = { ...vacancy, ...(title ? { title } : {}), ...(company ? { company } : {}), ...remote, ...sourcePublished(posting.datePosted), snippet: (snippet || vacancy.snippet).slice(0, 4_000) };
+      enriched[index] = { ...vacancy, ...(title ? { title } : {}), ...(company ? { company } : {}), ...remote, ...sourcePublished(posting.datePosted), snippet: (snippet || vacancy.snippet).slice(0, maxSnippetLength) };
     } catch (error) {
       // Rate-limited: stop asking, the rest keep their listing summaries.
       if (error instanceof HttpError && error.status === 429) break;

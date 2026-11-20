@@ -2,17 +2,24 @@ import express from "express";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { collectVacancies } from "./collect.js";
-import { readLocalConfig, setSourceDisabled } from "./local-config.js";
+import type { SourceSummary } from "./api.js";
+import { readLocalConfig, readProfile, setSourceDisabled } from "./local-config.js";
 import { readSourceReports } from "./source-reports.js";
-import { sources, wantApplyBotSource } from "./sources.js";
-import { readVacancies, setVacancyStatus, type VacancyStatus } from "./store.js";
+import { activeSourceIds, allSources } from "./sources.js";
+import { isExpiredPost, pruneInactiveSources, readVacancies, setVacancyStatus, type SavedVacancy, type VacancyStatus } from "./store.js";
 
 const app = express();
 app.use(express.json());
 
+/** Stored vacancies without queued posts that have aged out since they were collected. */
+async function visibleVacancies(): Promise<SavedVacancy[]> {
+  const { maxAgeDays } = readProfile().profile;
+  return (await readVacancies()).filter((vacancy) => !isExpiredPost(vacancy, maxAgeDays));
+}
+
 app.get("/api/vacancies", async (request, response) => {
   const status = request.query.status;
-  const vacancies = await readVacancies();
+  const vacancies = await visibleVacancies();
   response.json(status ? vacancies.filter((vacancy) => vacancy.status === status) : vacancies);
 });
 
@@ -23,13 +30,11 @@ app.post("/api/vacancies/:id/status", async (request, response) => {
   return vacancy ? response.json(vacancy) : response.status(404).json({ error: "Vacancy not found" });
 });
 
-const allSources = [...sources, wantApplyBotSource];
-
 /** Every configured source with its last collection report and the user's decisions on it. */
 app.get("/api/sources", async (_request, response) => {
-  const [reports, vacancies] = await Promise.all([readSourceReports(), readVacancies()]);
+  const [reports, vacancies] = await Promise.all([readSourceReports(), visibleVacancies()]);
   const disabled = new Set(readLocalConfig().disabledSources ?? []);
-  response.json(allSources.map((source) => {
+  response.json(allSources.map((source): SourceSummary => {
     const own = vacancies.filter((vacancy) => vacancy.source === source.id);
     const count = (status: VacancyStatus) => own.filter((vacancy) => vacancy.status === status).length;
     return {
@@ -45,11 +50,13 @@ app.get("/api/sources", async (_request, response) => {
   }));
 });
 
-app.post("/api/sources/:id/enabled", (request, response) => {
+app.post("/api/sources/:id/enabled", async (request, response) => {
   const enabled = request.body?.enabled;
   if (typeof enabled !== "boolean") return response.status(400).json({ error: "enabled must be true or false" });
   if (!allSources.some((source) => source.id === request.params.id)) return response.status(404).json({ error: "Source not found" });
   setSourceDisabled(request.params.id, !enabled);
+  // A switched-off source's undecided cards leave the queue now; they return with its next collection.
+  if (!enabled) await pruneInactiveSources(activeSourceIds());
   return response.json({ id: request.params.id, enabled });
 });
 
