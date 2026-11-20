@@ -33,6 +33,12 @@ export interface MatchProfile {
    */
   excludeRussia?: boolean;
   /**
+   * Drop vacancies that require working from the United States: "US only",
+   * "Remote (US)", "must be based in the US", "authorized to work in the US".
+   * An American employer alone does not count.
+   */
+  excludeUSA?: boolean;
+  /**
    * Drop vacancies from feeds of posts (Telegram channels) published more than
    * this many days ago; 30 when absent. Career boards list only open vacancies
    * and are kept.
@@ -105,8 +111,8 @@ function checkProfile(profile: MatchProfile, path: string): MatchProfile {
   if (profile.maxAgeDays !== undefined && (typeof profile.maxAgeDays !== "number" || profile.maxAgeDays <= 0)) {
     throw new Error(`${path}: profile.maxAgeDays должен быть положительным числом`);
   }
-  if (profile.excludeRussia !== undefined && typeof profile.excludeRussia !== "boolean") {
-    throw new Error(`${path}: profile.excludeRussia должен быть true или false`);
+  for (const key of ["excludeRussia", "excludeUSA"] as const) {
+    if (profile[key] !== undefined && typeof profile[key] !== "boolean") throw new Error(`${path}: profile.${key} должен быть true или false`);
   }
   return { ...profile, maxAgeDays: profile.maxAgeDays ?? defaultMaxAgeDays };
 }

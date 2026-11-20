@@ -82,6 +82,38 @@ describe("createRater", () => {
     });
   });
 
+  describe("USA", () => {
+    const rateUsa = createRater({ ...profile, excludeRussia: false, excludeUSA: true });
+    const signs = [
+      "Remote · USA · Applicants from: USA · USD 204000-290000 / year",
+      "Senior Frontend Engineer (Remote - US)",
+      "This role is US only.",
+      "You must be based in the United States.",
+      "Candidates must be authorized to work in the U.S. without sponsorship.",
+      "Requires US citizenship and an active security clearance.",
+      "You must be US-based to apply.",
+      "Удалённо только из США",
+    ];
+    for (const sign of signs) {
+      it(`drops «${sign}»`, () => assert.equal(dropped(rateUsa(vacancy("Tech Lead", sign))), "usa"));
+    }
+
+    it("keeps American employers hiring worldwide", () => {
+      for (const snippet of [
+        "We are a US-based company hiring across Europe.",
+        "Lead technical discussions with US-based clients.",
+        "Join us remotely from anywhere.",
+        "Headquartered in San Francisco, fully remote worldwide.",
+      ]) {
+        assert.ok("vacancy" in rateUsa(vacancy("Tech Lead", snippet)), snippet);
+      }
+    });
+
+    it("is off unless the profile asks for it", () => {
+      assert.ok("vacancy" in rate(vacancy("Tech Lead", "Applicants from: USA")));
+    });
+  });
+
   it("drops a blocker anywhere in the text", () => {
     assert.deepEqual(rate(vacancy("Tech Lead", "Мы делаем продукты для гемблинга")), { dropped: "blocker", detail: "гемблинга" });
   });

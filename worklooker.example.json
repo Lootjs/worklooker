@@ -12,6 +12,7 @@
     "excludeRoles": ["junior", "intern", "стажёр*", "стажер*"],
     "blockers": [],
     "excludeRussia": false,
+    "excludeUSA": false,
     "maxAgeDays": 30
   },
   "disabledSources": []

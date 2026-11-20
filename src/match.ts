@@ -45,12 +45,33 @@ const russiaPattern = word([
 // A Russian legal form. Case-sensitive, so an exclamation "Ооо!" is not one.
 const russianCompanyPattern = /(?<![\p{L}\p{N}_])ООО(?![\p{L}\p{N}_])/u;
 
+// Signs that a vacancy needs someone working from the United States. Unlike
+// Russia, an American employer alone is not one: many hire worldwide. A bare
+// "us" counts only in fixed phrases, so "join us remotely" does not match.
+const usaName = String.raw`(?:u\.s\.(?:a\.)?|usa|united\s+states(?:\s+of\s+america)?|сша)`;
+const usa = String.raw`(?:us|${usaName})`;
+const usaPattern = word([
+  String.raw`${usa}[\s-]*only`,
+  // "US-based" alone may describe clients or the company; only the candidate counts.
+  String.raw`(?:must\s+be|you(?:'re|’re|\s+are)|candidates?\s+(?:must|should)\s+be)\s+${usa}[\s-]*based`,
+  String.raw`${usa}[\s-]*based\s+(?:candidates?|applicants?|only|remote)`,
+  String.raw`remote\s*[-–—,(:/|]\s*${usa}`,
+  String.raw`${usaName}\s*[-–—,(:/|]?\s*remote`,
+  String.raw`applicants\s+from:?\s*${usa}`,
+  String.raw`(?:based|located|residing|reside|living|live)\s+(?:in|within)\s+(?:the\s+)?${usa}`,
+  String.raw`(?:authori[sz]ed|authori[sz]ation|eligible|eligibility|right)\s+to\s+work\s+in\s+(?:the\s+)?${usa}`,
+  String.raw`${usa}\s+(?:citizens?(?:hip)?|persons?|residents?|work\s+authori[sz]ation)`,
+  String.raw`green\s+card|security\s+clearance`,
+  String.raw`(?:только|удал[её]нн?[а-яё]*)\s+(?:из|в|по)\s+сша`,
+  String.raw`(?:резидент|граждан)[а-яё]*\s+сша`,
+].join("|"));
+
 function textFor(vacancy: Vacancy): string {
   return `${vacancy.title} ${vacancy.company ?? ""} ${vacancy.snippet}`.replace(/\s+/g, " ");
 }
 
 /** Why a vacancy did not enter the queue; the first rule that failed. */
-export type DropReason = "excludedRole" | "notRemote" | "notTargetRole" | "russia" | "blocker" | "lowScore";
+export type DropReason = "excludedRole" | "notRemote" | "notTargetRole" | "russia" | "usa" | "blocker" | "lowScore";
 
 export type MatchVerdict =
   | { vacancy: RatedVacancy }
@@ -111,6 +132,10 @@ export function createRater(profile: MatchProfile): (vacancy: Vacancy) => MatchV
     if (profile.excludeRussia) {
       const sign = text.match(russiaPattern) ?? text.match(russianCompanyPattern);
       if (sign) return { dropped: "russia", detail: sign[0] };
+    }
+    if (profile.excludeUSA) {
+      const sign = text.match(usaPattern);
+      if (sign) return { dropped: "usa", detail: sign[0] };
     }
     const blocker = text.match(blockerPattern);
     if (blocker) return { dropped: "blocker", detail: blocker[0] };

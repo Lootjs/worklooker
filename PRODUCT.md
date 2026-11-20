@@ -34,7 +34,7 @@ The collector runs locally and is started manually or by a local scheduler. The 
 - A vacancy identity is the normalized role and company name; updated postings retain their prior status.
 - Liked jobs are visible in a dedicated section. Removing a like returns a job to the new queue.
 - Rejected jobs go to a local JSON archive and never appear in the new queue.
-- The profile can exclude roles by title, industries anywhere in the text, Russian employers and roles that require working from Russia, and Telegram posts older than a set number of days. Career boards list only open roles, so their age is shown but never filters.
+- The profile can exclude roles by title, industries anywhere in the text, Russian employers and roles that require working from Russia, roles that require working from the United States, and Telegram posts older than a set number of days. Career boards list only open roles, so their age is shown but never filters.
 - A sources view shows each source's last collection: how many vacancies passed the profile, how many were filtered out and why (with example titles), and the user's decisions on it. Sources can be switched off there.
 - Sources blocked by authentication or anti-bot protection report an error; the product does not bypass those protections.
 - Telegram API credentials and session data are local-only and excluded from source control.

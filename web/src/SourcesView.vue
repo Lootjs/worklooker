@@ -26,6 +26,7 @@ const dropLabels: Record<SourceDropReason, string> = {
   notTargetRole: "не целевая роль",
   notRemote: "не удалёнка",
   russia: "РФ",
+  usa: "США",
   excludedRole: "исключённая роль",
   blocker: "блокер",
   stale: "старый пост",
