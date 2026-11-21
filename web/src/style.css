@@ -45,10 +45,15 @@
   --night-help: rgba(27, 32, 39, .92);
   --night-hover: rgba(255,255,255,.08);
   --shadow-help: 0 8px 24px rgba(0,0,0,.35);
+  --shadow-menu: 0 12px 32px rgba(0,0,0,.22);
+  --mask-solid: #000;
+  --mask-mid: rgba(0,0,0,.6);
+  --mask-tail: rgba(0,0,0,.1);
   --paper-line: #d4d6d2;
   --paper-muted-line: #b9bfbd;
   --paper-secondary: #e6ecea;
   --paper-secondary-hover: #d9e3e0;
+  --drop-mid: #8a959a;
   --chip-mint: #d9ece9;
   --chip-ink: #244956;
   --deep-teal: #153e4b;
@@ -143,12 +148,22 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
 @property --fade-lines { syntax: "<number>"; inherits: false; initial-value: 2.5; }
 .snippet { display: block; width: 100%; max-width: 65ch; margin: var(--space-6) 0 0; padding: 0; border: 0; background: transparent; color: var(--ink-body); font-size: var(--text-body); line-height: 1.6; text-align: left; white-space: pre-line; text-wrap: pretty; cursor: pointer; }
 .snippet-text { --fade-lines: 2.5; display: block; overflow: hidden; max-height: calc(6 * 1.6em); transition: max-height .32s cubic-bezier(.2,.9,.2,1), --fade-lines .5s cubic-bezier(.25,.8,.25,1); }
-.snippet-text.is-clipped { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade-lines) * 1.6em), rgba(0,0,0,.6) calc(100% - var(--fade-lines) * .8em), rgba(0,0,0,.1) 100%); mask-image: linear-gradient(to bottom, #000 calc(100% - var(--fade-lines) * 1.6em), rgba(0,0,0,.6) calc(100% - var(--fade-lines) * .8em), rgba(0,0,0,.1) 100%); }
+.snippet-text.is-clipped { -webkit-mask-image: linear-gradient(to bottom, var(--mask-solid) calc(100% - var(--fade-lines) * 1.6em), var(--mask-mid) calc(100% - var(--fade-lines) * .8em), var(--mask-tail) 100%); mask-image: linear-gradient(to bottom, var(--mask-solid) calc(100% - var(--fade-lines) * 1.6em), var(--mask-mid) calc(100% - var(--fade-lines) * .8em), var(--mask-tail) 100%); }
 .snippet:hover .snippet-text { --fade-lines: 1.5; }
-.snippet:focus-visible { outline-offset: 6px; border-radius: 6px; }
-.vacancy.expanded .snippet-text, .liked-card.expanded .snippet-text { max-height: 400em; -webkit-mask-image: none; mask-image: none; }
+.snippet:focus-visible { outline-offset: 6px; border-radius: var(--radius-nav); }
+/*
+ * Unfolded: the text's measured height (set by v-clipped), so folding starts
+ * at once instead of from a far-off ceiling; the fade shrinks to nothing and
+ * grows back while folding, rather than snapping on.
+ */
+.vacancy.expanded .snippet-text, .liked-card.expanded .snippet-text { max-height: var(--full-height, 400em); --fade-lines: 0; }
+/* Source, dates and link open and close by height, so the row below glides. */
+.details-reveal { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .32s cubic-bezier(.2,.9,.2,1); }
+.details-clip { min-height: 0; overflow: hidden; }
+.vacancy.expanded .details-reveal, .liked-card.expanded .details-reveal { grid-template-rows: 1fr; }
+/* A liked card folded because focus moved on folds at once; the feed's scroll absorbs it. */
+.folding-now .snippet-text, .folding-now .details-reveal { transition: none; }
 .vacancy.expanded .copy { align-self: stretch; }
-.vacancy.expanded h1 { display: block; overflow: visible; }
 .details { display: grid; gap: var(--space-3); margin: var(--space-8) 0 0; padding: var(--space-4) 0 0; border-top: 1px solid var(--paper-line); color: var(--ink-body); font-size: var(--text-control); line-height: 1.45; }
 .details div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--space-3); }
 .details dt { color: var(--ink-meta); font-weight: 700; }
@@ -173,7 +188,7 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
 .remove-split { position: relative; display: inline-flex; gap: 1px; }
 .remove-split > button:first-child { border-radius: var(--radius-button) 0 0 var(--radius-button); }
 .remove-split > .remove-caret { padding: var(--space-3) 10px; border-radius: 0 var(--radius-button) var(--radius-button) 0; }
-.remove-menu { position: absolute; right: 0; bottom: calc(100% + var(--space-2)); z-index: 4; min-width: 100%; padding: 6px; border-radius: var(--radius-message); background: var(--paper); box-shadow: 0 12px 32px rgba(0,0,0,.22); animation: arrive .16s cubic-bezier(.2,.9,.2,1); }
+.remove-menu { position: absolute; right: 0; bottom: calc(100% + var(--space-2)); z-index: 4; min-width: 100%; padding: 6px; border-radius: var(--radius-message); background: var(--paper); box-shadow: var(--shadow-menu); animation: arrive .16s cubic-bezier(.2,.9,.2,1); }
 .remove-menu button { display: flex; width: 100%; align-items: center; gap: var(--space-2); padding: 10px var(--space-3); border: 0; border-radius: var(--radius-nav); background: transparent; color: var(--reject-red); font-size: var(--text-control); font-weight: 700; white-space: nowrap; }
 .remove-menu button:hover, .remove-menu button:focus-visible { background: var(--reject-blush); }
 .remove-menu kbd { margin-left: auto; border-color: currentColor; opacity: .7; }
@@ -201,9 +216,10 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
 .liked-card-body > * { min-width: 0; }
 .liked-card-body { display: grid; gap: var(--space-3); padding: var(--space-8); background: var(--paper); color: var(--ink); border-radius: var(--radius-card); box-shadow: 0 24px 60px rgba(0,0,0,.28); transition: filter .24s cubic-bezier(.2,.9,.2,1), opacity .24s cubic-bezier(.2,.9,.2,1), transform .32s cubic-bezier(.2,.9,.2,1); }
 .liked-card:not(.focused) { cursor: pointer; }
-.liked-card:not(.focused) .liked-card-body { filter: blur(3px); opacity: .45; }
-.liked-card.before .liked-card-body { transform: translateY(-14px) scale(.94); }
-.liked-card.after .liked-card-body { transform: translateY(14px) scale(.94); }
+/* Only the two cards that can enter the viewport need expensive blur layers. */
+.liked-card.adjacent .liked-card-body { filter: blur(3px); opacity: .45; }
+.liked-card.before.adjacent .liked-card-body { transform: translateY(-14px) scale(.94); }
+.liked-card.after.adjacent .liked-card-body { transform: translateY(14px) scale(.94); }
 .liked-card .author { margin: 0; }
 .liked-card h2 { font-size: var(--text-card-title); line-height: 1.1; letter-spacing: -.02em; }
 .liked-card .company { margin: 0; }
@@ -266,7 +282,7 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
 .yield-pass { background: var(--ink-accent); }
 /* Drop reasons are neutral shades, largest first: they inform, they do not judge. */
 [data-shade="0"] { background: var(--ink-meta); }
-[data-shade="1"] { background: #8a959a; }
+[data-shade="1"] { background: var(--drop-mid); }
 [data-shade="2"] { background: var(--paper-muted-line); }
 [data-shade="3"] { background: var(--paper-line); }
 .yield-legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
@@ -276,7 +292,7 @@ h1, h2 { margin: 0; font-weight: 800; text-wrap: balance; }
 .yield-legend button:hover { color: var(--ink-accent); }
 .yield-legend button:hover .legend-label, .yield-legend button[aria-expanded="true"] .legend-label { text-decoration-color: currentColor; }
 .yield-legend button[aria-expanded="true"] { color: var(--ink-accent); font-weight: 700; }
-.swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.swatch { flex: none; width: 8px; height: 8px; border-radius: var(--radius-control); }
 .legend-count { color: var(--ink-meta); font-weight: 700; font-variant-numeric: tabular-nums; }
 .source-action { grid-column: 3; justify-self: end; }
 /* Power switch: deep teal while the source is collected (like "save"), mist when off. */

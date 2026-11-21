@@ -6,13 +6,20 @@ import SourcesView from "./SourcesView.vue";
 
 type View = "new" | "liked" | "sources";
 
+/** Lines a folded description shows; style.css uses the same number. */
+const foldedLines = 6;
+
 /**
- * Marks a description cut off by its folded height, so only text that really
- * continues gets the dissolving last lines. Rechecked whenever its size changes.
+ * Measures a description for folding. `is-clipped` marks text longer than the
+ * folded lines, so only text that really continues dissolves; `--full-height`
+ * is the text's own height, so unfolding and folding animate between two real
+ * heights instead of from a far-off ceiling. Rechecked whenever its size changes.
  */
 const clippedObservers = new WeakMap<HTMLElement, ResizeObserver>();
 function markClipped(element: HTMLElement): void {
-  element.classList.toggle("is-clipped", element.scrollHeight > element.clientHeight + 1);
+  const folded = foldedLines * parseFloat(getComputedStyle(element).lineHeight);
+  element.style.setProperty("--full-height", `${element.scrollHeight}px`);
+  element.classList.toggle("is-clipped", element.scrollHeight > folded + 1);
 }
 const vClipped = {
   mounted(element: HTMLElement): void {
@@ -92,21 +99,27 @@ const focusedLiked = computed(() => likedCards.value[focusIndex.value]);
 const likedExpandedId = ref<string>();
 /** The liked card whose "remove" menu is open. */
 const removeMenuId = ref<string>();
-watch(focusIndex, () => {
-  // A taller card shifts the feed, so it folds back as soon as focus moves on.
-  likedExpandedId.value = undefined;
+watch(focusIndex, async () => {
   removeMenuId.value = undefined;
+  const expandedId = likedExpandedId.value;
+  if (!expandedId) return;
+  // A taller card shifts the feed, so it folds back as soon as focus moves on.
+  // The fold is instant, and when the card sits above the screen's middle the
+  // scroll moves by the height it lost, so what the user reads stays put.
+  const feed = feedEl.value;
+  const card = feedCards()[likedCards.value.findIndex((item) => item.id === expandedId)];
+  const before = card?.offsetHeight ?? 0;
+  const above = !!(card && feed && card.offsetTop + before / 2 < feed.scrollTop + feed.clientHeight / 2);
+  card?.classList.add("folding-now");
+  likedExpandedId.value = undefined;
+  await nextTick();
+  if (feed && card && above) feed.scrollTop -= before - card.offsetHeight;
+  requestAnimationFrame(() => card?.classList.remove("folding-now"));
 });
 
-async function toggleLikedDetails(vacancy: Vacancy): Promise<void> {
+function toggleLikedDetails(vacancy: Vacancy): void {
   const expanding = likedExpandedId.value !== vacancy.id;
   likedExpandedId.value = expanding ? vacancy.id : undefined;
-  if (!expanding) return;
-  // Keep the card's top in view: it now grows downward, past the screen.
-  await nextTick();
-  const feed = feedEl.value;
-  const card = feedCards()[likedCards.value.findIndex((item) => item.id === vacancy.id)];
-  if (feed && card) feed.scrollTo({ top: card.offsetTop - 24, behavior: reducedMotion.matches ? "auto" : "smooth" });
 }
 
 function toggleRemoveMenu(vacancy: Vacancy): void {
@@ -131,6 +144,36 @@ function feedCards(): HTMLElement[] {
   return Array.from(feedEl.value?.querySelectorAll<HTMLElement>(".liked-card") ?? []);
 }
 
+/**
+ * Cards never overlap, so their centres are ordered. A binary search finds the
+ * one spanning the feed middle — or the closest neighbour in the gap — without
+ * measuring every card on each animation frame.
+ */
+function focusedCardIndex(cards: HTMLElement[], middle: number): number {
+  let lower = 0;
+  let upper = cards.length - 1;
+
+  while (lower <= upper) {
+    const index = Math.floor((lower + upper) / 2);
+    const card = cards[index];
+    const top = card.offsetTop;
+    const bottom = top + card.offsetHeight;
+
+    if (middle < top) upper = index - 1;
+    else if (middle > bottom) lower = index + 1;
+    else return index;
+  }
+
+  const neighbours = [lower - 1, lower].filter((index) => index >= 0 && index < cards.length);
+  return neighbours.reduce((closest, index) => {
+    const card = cards[index];
+    const distance = Math.abs(card.offsetTop + card.offsetHeight / 2 - middle);
+    const closestCard = cards[closest];
+    const closestDistance = Math.abs(closestCard.offsetTop + closestCard.offsetHeight / 2 - middle);
+    return distance < closestDistance ? index : closest;
+  }, neighbours[0] ?? 0);
+}
+
 let feedFrame = 0;
 function onFeedScroll(): void {
   if (feedFrame) return;
@@ -140,16 +183,7 @@ function onFeedScroll(): void {
     if (!feed) return;
     const middle = feed.scrollTop + feed.clientHeight / 2;
     const cards = feedCards();
-    // An expanded card is taller than the screen: while it spans the middle it
-    // keeps focus, even though a neighbour's centre may be nearer.
-    const spanning = cards.findIndex((element) => element.offsetTop <= middle && middle <= element.offsetTop + element.offsetHeight);
-    let nearest = 0;
-    let nearestDistance = Infinity;
-    cards.forEach((element, index) => {
-      const distance = Math.abs(element.offsetTop + element.offsetHeight / 2 - middle);
-      if (distance < nearestDistance) { nearest = index; nearestDistance = distance; }
-    });
-    focusIndex.value = spanning >= 0 ? spanning : nearest;
+    focusIndex.value = focusedCardIndex(cards, middle);
   });
 }
 
@@ -429,7 +463,7 @@ onUnmounted(() => {
         v-for="(vacancy, index) in likedCards"
         :key="vacancy.id"
         class="liked-card"
-        :class="{ focused: index === focusIndex, before: index < focusIndex, after: index > focusIndex, expanded: likedExpandedId === vacancy.id }"
+        :class="{ focused: index === focusIndex, adjacent: Math.abs(index - focusIndex) === 1, before: index < focusIndex, after: index > focusIndex, expanded: likedExpandedId === vacancy.id }"
         :aria-current="index === focusIndex ? 'true' : undefined"
         @click.capture="onLikedCardClick($event, index)"
       >
@@ -447,12 +481,14 @@ onUnmounted(() => {
           <button type="button" class="snippet" :aria-expanded="likedExpandedId === vacancy.id" :tabindex="index === focusIndex ? 0 : -1" @click="toggleLikedDetails(vacancy)">
             <span v-clipped class="snippet-text">{{ vacancy.snippet || 'Описание есть на странице вакансии.' }}</span>
           </button>
-          <dl v-if="likedExpandedId === vacancy.id" class="details">
-            <div><dt>Источник</dt><dd>{{ vacancy.sourceName }}</dd></div>
-            <div v-if="vacancy.publishedAt"><dt>{{ vacancy.publishedAtSource === 'source' ? 'Опубликована' : 'Найдена' }}</dt><dd>{{ formatDateTime(vacancy.publishedAt) }}</dd></div>
-            <div><dt>Последний сбор</dt><dd>{{ formatDateTime(vacancy.fetchedAt) }}</dd></div>
-            <div><dt>Ссылка</dt><dd><a class="detail-link" :href="vacancy.url" target="_blank" rel="noreferrer" :tabindex="index === focusIndex ? 0 : -1">{{ vacancy.url }}</a></dd></div>
-          </dl>
+          <div class="details-reveal" :inert="likedExpandedId !== vacancy.id"><div class="details-clip">
+            <dl class="details">
+              <div><dt>Источник</dt><dd>{{ vacancy.sourceName }}</dd></div>
+              <div v-if="vacancy.publishedAt"><dt>{{ vacancy.publishedAtSource === 'source' ? 'Опубликована' : 'Найдена' }}</dt><dd>{{ formatDateTime(vacancy.publishedAt) }}</dd></div>
+              <div><dt>Последний сбор</dt><dd>{{ formatDateTime(vacancy.fetchedAt) }}</dd></div>
+              <div><dt>Ссылка</dt><dd><a class="detail-link" :href="vacancy.url" target="_blank" rel="noreferrer" :tabindex="index === focusIndex ? 0 : -1">{{ vacancy.url }}</a></dd></div>
+            </dl>
+          </div></div>
           <!-- Same row as the queue card: the actions, on the right. -->
           <footer class="vacancy-actions">
             <div class="decision-dock">
@@ -505,12 +541,14 @@ onUnmounted(() => {
             <button type="button" class="snippet" :aria-expanded="expanded" @click="expanded = !expanded">
               <span v-clipped class="snippet-text">{{ current.snippet || 'Описание есть на странице вакансии.' }}</span>
             </button>
-            <dl v-if="expanded" class="details">
-              <div><dt>Источник</dt><dd>{{ current.sourceName }}</dd></div>
-              <div v-if="current.publishedAt"><dt>{{ current.publishedAtSource === 'source' ? 'Опубликована' : 'Найдена' }}</dt><dd>{{ formatDateTime(current.publishedAt) }}</dd></div>
-              <div><dt>Последний сбор</dt><dd>{{ formatDateTime(current.fetchedAt) }}</dd></div>
-              <div><dt>Ссылка</dt><dd><a class="detail-link" :href="current.url" target="_blank" rel="noreferrer">{{ current.url }}</a></dd></div>
-            </dl>
+            <div class="details-reveal" :inert="!expanded"><div class="details-clip">
+              <dl class="details">
+                <div><dt>Источник</dt><dd>{{ current.sourceName }}</dd></div>
+                <div v-if="current.publishedAt"><dt>{{ current.publishedAtSource === 'source' ? 'Опубликована' : 'Найдена' }}</dt><dd>{{ formatDateTime(current.publishedAt) }}</dd></div>
+                <div><dt>Последний сбор</dt><dd>{{ formatDateTime(current.fetchedAt) }}</dd></div>
+                <div><dt>Ссылка</dt><dd><a class="detail-link" :href="current.url" target="_blank" rel="noreferrer">{{ current.url }}</a></dd></div>
+              </dl>
+            </div></div>
           </div>
           <!-- Actions live inside the card, like the liked feed: the decision on the right. -->
           <footer class="vacancy-actions">
